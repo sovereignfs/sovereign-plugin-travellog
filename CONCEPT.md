@@ -159,22 +159,26 @@ Planner).
   status is what phase 1 ships; simpler to build, revisit if it feels
   wrong.)*
 - Card CTA depends on status: **Continue planning** (planning) → Planner;
-  **View itinerary** (upcoming) → Planner in read mode; **Open Trip Mode**
-  (ongoing) → Planner's day view, mobile-only; **View trip** (completed) →
-  the detail column.
+  **View itinerary** (upcoming) → Planner (the same editable workspace —
+  there's no separate read-only mode); **Open Trip Mode** (ongoing) → the
+  dedicated Trip Mode screen (`T.19`, `/travellog/planner/[tripId]/mode`) —
+  reachable from this card CTA at any width, not gated to mobile the way
+  Planner's own separate "Start Trip Mode" entry point is; **View trip**
+  (completed) → the detail column.
 - **Filtering**: status chips (All/Planning/Upcoming/Ongoing/Completed) + a
   name search. Year filtering is deferred until trip history is actually
   large enough to need it.
 - **Clicking a card** (not its CTA) opens the **detail column**: basic trip
-  metadata, and sharing — add/remove people via the platform user directory
-  (`sdk.directory`, same pattern as `sovereign-plugin-docs`'s
-  `FolderShareButton`/`FolderShareDialog`). A shared trip's members can view
-  and edit it; only the owner manages membership. **This access model is
-  inferred from "add/remove people" + a "settings" panel — not yet
-  explicitly confirmed; see open questions.** A full single-page trip
-  details view is explicitly deferred (your own scoping call — "for now we
-  can skip that by just showing basic trip details"); the detail column
-  stays intentionally basic until that page exists.
+  metadata, and an editable **companions** field — a free-text tag list
+  (`TagInput`) for context only, e.g. "Sam, Jordan." **Resolved (open
+  question 2, `T.14`): not real shared access.** The real-membership design
+  this bullet originally sketched (`sdk.directory`,
+  `FolderShareButton`/`FolderShareDialog`, a member who can view/edit) was
+  never built — `travellog_trip_members` doesn't exist; only the trip owner
+  can ever see or edit a trip. A full single-page trip details view is
+  explicitly deferred (your own scoping call — "for now we can skip that by
+  just showing basic trip details"); the detail column stays intentionally
+  basic until that page exists.
 - **"Create trip" CTA** opens a modal — the same underlying action Planner's
   own "New trip" triggers; there's exactly one create-trip flow with two
   entry points.
@@ -280,10 +284,9 @@ Product-level description, not a schema — `SPEC.md` formalizes this:
   handling — UTC + IANA zone + local offset, not just a naive timestamp),
   optional note/photo(s)/companions, and an optional resolved trip link.
 - **Trip** — an ordered sequence of stops; its own date range is derived
-  from its stops, never set independently. Optionally shared with specific
-  platform users, added/removed from the trip's detail panel (see "Web UI,"
-  above — the underlying access model there is inferred from the UI
-  description, not yet explicitly confirmed).
+  from its stops, never set independently. Carries an editable, free-text
+  **companions** tag list for context (e.g. "Sam, Jordan") — informational
+  only, not real shared access; see "Web UI," above, and open question 2.
 - **Stop** — a place plus an arrival/departure date range: the unit a trip
   is built from ("starting point, then locations in between").
 - **Trip day / Itinerary item** — each stop's date range breaks into days;
@@ -324,13 +327,16 @@ design). See `SPEC.md`'s "A note on drift" section for the full detail.
    technical unknown in the whole plugin. Needs its own technical decision,
    and possibly its own RFC, before Slice 1's check-in UI can really be
    built.
-2. **Trip sharing semantics.** The Trips detail panel (see "Web UI," above)
-   assumes real shared access — another platform user can view/edit a trip
-   they're added to, via `sdk.directory` + a `travellog_trip_members`-style
-   table, the same pattern Docs folders and Kanban boards already use — but
-   this was inferred from "add/remove people" + a settings panel, not
-   explicitly confirmed. The alternative is lightweight companion tags (no
-   real access granted, just names for context).
+2. **Trip sharing semantics — resolved: lightweight companion tags, not
+   real shared access.** `T.10` shipped without `travellog_trip_members`
+   (this question was still open at the time, and the task's own
+   conditional scope says to substitute a plain field in that case); `T.14`
+   built the informational-only `trips.companions` free-text tag field
+   instead — no `sdk.directory` integration, no real access grant, only the
+   trip owner can ever view/edit a trip. See `schema.ts`'s header comment
+   and `SPEC.md`'s `T.14` entry for the full resolution. Revisit only if
+   real shared trip access becomes an actual ask — nothing shipped
+   forecloses adding `travellog_trip_members` later.
 3. **Trip planning-status derivation.** Pure computed status (`planning` ⇄
    `upcoming` ⇄ `ongoing` ⇄ `completed`, driven entirely by stop dates) vs.
    an explicit status the user sets — e.g. a trip stays `planning` even

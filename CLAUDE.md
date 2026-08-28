@@ -154,7 +154,7 @@ Don't invent detail here ahead of its own pass — flag it and ask instead:
 
 ## Status
 
-Current manifest version: `0.23.0` (`T.1`–`T.21` shipped — Slice 1 web is
+Current manifest version: `0.24.0` (`T.1`–`T.22` shipped — Slice 1 web is
 feature-complete; Slice 2 (web) is ship-ready per its own review checklist
 — data model, server layer, auto-link engine, Trips, and the whole Planner
 all exist, audited live against `CONCEPT.md` in `T.17`, which also closed
@@ -172,7 +172,19 @@ data-fetch-free bare route, `sdk.offline`-cached Trip Mode and recent
 places, and an `sdk.offline-queue`-backed check-in flow — the first real
 consumer of that write-queue primitive anywhere in the platform, live-
 verified end to end via a real queue → drain → synced-visit round trip).
-`T.22`, Slice 3 hardening & release pass, is next). Task history and the
-reasoning behind
-every completed task lives in `SPEC.md`'s `Status` section — that's the
-changelog; don't duplicate it here.
+`T.22` (Slice 3 hardening & release pass) closed it out: four stale-doc/
+routing gaps found by cross-referencing `CONCEPT.md`/`SPEC.md` against
+shipped code (a Trips-page CTA still routing to plain Planner instead of
+`T.19`'s real Trip Mode screen; `SPEC.md`'s Routes and SDK-usage tables;
+`ROADMAP.md`'s header; `CONCEPT.md`'s trip-sharing description, which
+still described the real-membership design `T.10`/`T.14` had already
+resolved away from), plus a live, end-to-end cross-slice walkthrough on
+one real account — check in, build history, plan a trip spanning today,
+auto-link an unplanned check-in into it, open Trip Mode via the just-fixed
+CTA, confirm status transitions. The full phase 1 concept (web
+Trips/Check-ins/Planner plus the mobile check-in/Trip Mode data layer) is
+now complete. `T.23`/`T.24` (Sovereign portability hooks, optional field
+encryption — Phase 1d) remain, picked up on request rather than by
+default. Task history and the reasoning behind every completed task lives
+in `SPEC.md`'s `Status` section — that's the changelog; don't duplicate it
+here.

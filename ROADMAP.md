@@ -1,6 +1,6 @@
 # Sovereign Travellog — Roadmap
 
-**Manifest version:** 0.17.0 · **Last updated:** 2026-08-28
+**Manifest version:** 0.23.0 · **Last updated:** 2026-08-29
 
 Chronological build index — one row per PR, platform-`ROADMAP.md` style. Full
 task detail lives in [SPEC.md](SPEC.md); the product concept in
@@ -54,7 +54,7 @@ entry for the full account.
 | 0.21.0 | Trip Mode UI (mobile-first) & maps hand-off   | ✅     | [T.19](SPEC.md#t19--trip-mode-ui-mobile-first--maps-hand-off)                    |
 | 0.22.0 | Notification reminders                        | ✅     | [T.20](SPEC.md#t20--notification-reminders)                                      |
 | 0.23.0 | Offline capability wiring                     | ✅     | [T.21](SPEC.md#t21--offline-capability-wiring)                                   |
-| 0.24.0 | Slice 3 hardening & release pass              | ⬜     | [T.22](SPEC.md#t22--slice-3-hardening--release-pass)                             |
+| 0.24.0 | Slice 3 hardening & release pass              | ✅     | [T.22](SPEC.md#t22--slice-3-hardening--release-pass)                             |
 
 ## Phase 1d — Portability & deferred
 

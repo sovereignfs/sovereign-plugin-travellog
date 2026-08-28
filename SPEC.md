@@ -7,11 +7,113 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.21` shipped, manifest at `0.23.0` (`T.5a`, slot
+🚧 In progress — `T.1`–`T.22` shipped, manifest at `0.24.0` (`T.5a`, slot
 `0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block
-`T.6`–`T.21`). Slice 1 (web) is feature-complete; Slice 2 (web) is
-ship-ready; Slice 3 (Trip Mode) is now fully built, including offline
-support — `T.22` (Slice 3 hardening & release pass) is next.
+`T.6`–`T.22`). Slice 1 (web) is feature-complete; Slice 2 (web) is
+ship-ready; Slice 3 (Trip Mode) is fully built and hardened — the full
+phase 1 concept (web Trips/Check-ins/Planner plus the mobile check-in/Trip
+Mode data layer) is complete and live-verified end to end on one real
+account. `T.23`/`T.24` (Sovereign portability hooks, optional field
+encryption — Phase 1d) remain, picked up on request rather than by
+default.
+
+**`T.22` — Slice 3 hardening & release pass (`0.24.0`).** Full pass against
+`CONCEPT.md`'s Slice 3 description plus a cross-slice live walkthrough, per
+the task's own "fix gaps found live" mandate — no new feature work.
+
+**Four real doc/code gaps found via systematic cross-reference against
+shipped code:**
+
+1. `TripCard.tsx`'s Ongoing-status "Open Trip Mode" CTA still routed to the
+   plain Planner workspace (`/travellog/planner/[tripId]`) instead of
+   `T.19`'s actual Trip Mode screen (`/travellog/planner/[tripId]/mode`) —
+   a real Trip Mode route didn't exist when this CTA shipped in
+   `T.14`/`T.17`, and nothing revisited it once `T.19` built the real
+   destination. Fixed the routing and the component's own doc comment.
+2. `SPEC.md`'s own `## Routes` and `### SDK usage` tables were stale: Routes
+   still showed `/travellog` as a redirect to `/travellog/checkins`
+   (`T.21` replaced that with a real offline-capable home shell) with no
+   row for `/travellog/checkin`; SDK usage was missing
+   `@sovereignfs/sdk/offline` and `@sovereignfs/sdk/offline-queue` entirely
+   despite `T.21` shipping both.
+3. `ROADMAP.md`'s header still read "Manifest version: 0.17.0" — nine slots
+   stale.
+4. `CONCEPT.md` — the one substantive finding. Its "Web UI (decided) >
+   Trips" section and "Data classes at a glance" both still described a
+   real trip-sharing model (`sdk.directory`,
+   `FolderShareButton`/`FolderShareDialog`-style, a member who can
+   view/edit) that `CONCEPT.md`'s own open question 2 had left unresolved
+   — but `T.10`/`T.14` had already resolved it, in code, toward a
+   lightweight informational-only `trips.companions` tag field, no real
+   access grant, no `travellog_trip_members` table. `schema.ts`'s header
+   comment, `TripDetailPanel.tsx`'s own doc comment, and this file's own
+   `T.14` entry all already recorded that resolution accurately —
+   `CONCEPT.md`, the plugin's designated "authoritative product concept,"
+   was the one document that never caught up. Fixed the Trips section, the
+   Data class bullet, and resolved open question 2 in place (kept its
+   number — it's cited by that exact number from `schema.ts`, `authz.ts`,
+   `actions.ts`, `trip-status.ts`, `ROADMAP.md`, and
+   `docs/adhoc/web-trips.md`; renumbering would have silently orphaned
+   every one of those citations). Two adjacent staleness bugs surfaced in
+   the same CTA-description bullet while fixing it: Trip Mode was still
+   described as "Planner's day view, mobile-only" (finding 1 above made
+   that literally wrong — it's a dedicated route now, not gated here), and
+   "View itinerary (upcoming) → Planner in read mode" claimed a read-only
+   mode Planner has never had (confirmed by grep — no `readOnly`/read-only
+   reference anywhere in the Planner components).
+
+**Live cross-slice walkthrough, end to end on one real account** — the
+task's actual review checklist item. Blocked partway through by a genuine
+environment problem, not a code issue: the platform repo's shared
+checkout (also in active use by a concurrent background session) left
+`runtime/.next` corrupted — `routes-manifest.json` missing, webpack chunks
+referencing files no longer on disk, confirmed via server logs (`Cannot
+find module './188.js'`), not just inferred. Cleared the build cache (safe
+— a fully regenerable artifact, not tracked by git, holding no uncommitted
+work) and restarted; the dev server came back clean.
+
+Executed the walkthrough against `Lisbon Today Test`, a trip already
+sitting mid-flight in the dev DB from an earlier, interrupted attempt at
+this same scenario (Ongoing, Aug 27–29, one stop, one itinerary item) —
+used it directly rather than creating a duplicate. Added a second
+itinerary item ("Belem Tower viewpoint," plain-text/no-place, 10:00) to
+close out its empty Day 3, confirmed it persisted server-side after a page
+reload (one save attempt showed `net::ERR_ABORTED` in the network log — a
+harmless superseded duplicate request, not a lost write). Did an
+unplanned check-in ("Lisbon riverside cafe," free-text place entry —
+Nominatim itself had recovered and returned real results by this point,
+but stuck with the free-text path anyway to keep the check deterministic)
+and confirmed: it appears in the Check-ins timeline with a `Trip` badge
+(auto-link fired); Trips overview counts moved 8→9 places and 12→13
+check-ins (the read-side-projection guarantee — a new visit changes
+aggregates with no separate write); logically the only trip it could have
+linked to, since `Kyoto & Osaka` (Sep 2–4) shares no date overlap with
+`Lisbon Today Test` (Aug 27–29) — didn't inspect the isolated plugin DB
+directly to double-confirm the FK, since that namespace isn't reachable
+through the platform's default-namespace `sqlite3` file the way `T.12`'s
+original verification could reach it, and the date-window logic leaves no
+ambiguity to resolve. Opened Trip Mode via the just-fixed "Open Trip Mode"
+CTA — landed on the real Trip Mode screen (not Planner), correctly showed
+"Nothing planned for today," which is the *correct* state: the trip's one
+Day 2 item sits at 23:15, already past relative to the live UTC clock
+(~23:4x at the time), and the new Day 3 item hadn't become "today" yet
+(UTC midnight was ~15–20 minutes out) — a real, live instance of the
+UTC-anchored-`today` behavior `trip-status.ts` already documents as a
+known phase-1 limitation, not a bug. Confirmed status transitions for the
+two live-available statuses: `Lisbon Today Test` stayed `Ongoing`
+throughout (day 2 of 3, consistent before and after the check-in),
+`Kyoto & Osaka` stayed `Upcoming`. Didn't construct a `Planning` or a
+fresh `Completed` trip live — the status-badge/card-rendering path is
+identical across all four derived statuses (already exercised for
+`Completed` during `T.14`'s own live verification per its status entry
+below), and `trip-status.ts`'s pure-function derivation has its own
+dedicated unit coverage from `T.11`; a third and fourth live instance
+would confirm the same rendering code again, not new behavior.
+
+Full check suite clean: `format:check`, `lint`, this package's
+`typecheck`, `design:tokens:check` (129 tokens, no violations), and all
+355 travellog tests (unchanged from `T.21` — this task fixed routing and
+docs, not testable logic, so no new coverage was needed).
 
 **`T.21` — Offline capability wiring (`0.23.0`).** "Trip Mode and check-in
 work in a dead zone." The task's own deliverable text flagged this as "the
@@ -2296,6 +2398,8 @@ separate, not-yet-designed tree.
 | `sdk.directory` (RFC 0041)   | User search for trip sharing (`T.14`) — same pattern as `sovereign-plugin-docs`'s `FolderShareDialog` |
 | `sdk.portability.provideExport/provideImport` | Sovereign-native takeout (RFC 0007) — additional to, not the same as, the Swarm importer |
 | `navigator.geolocation`      | Current position for GPS check-in and Trip Mode (Web API, plugin-local — see "Location source") |
+| `@sovereignfs/sdk/offline` (RFC 0074/0078)   | `T.21` — Trip Mode's itinerary cache and the check-in screen's recent-places cache, read on the bare route/check-in mount, written on every successful fetch |
+| `@sovereignfs/sdk/offline-queue` (RFC 0078)  | `T.21` — offline check-in queueing (`enqueue`) and reconnect sync (`drainQueue`, in `OfflineSyncBoundary`) — this plugin is the platform's first real consumer of the write-queue half |
 
 ### Hard platform rules that apply here
 
@@ -2599,15 +2703,19 @@ Two genuinely separate import paths — do not conflate them:
 ## Routes
 
 ```
-/travellog                        Redirect → /travellog/checkins           [web]  (→ /travellog/trips once T.13 ships Trips for real — T.9 found live that redirecting to Trips' placeholder today undercuts Slice 1's "ships standalone and useful")
+/travellog                        Offline-capable home shell (T.21) — "Check in" CTA + cached   [web + offline entry point]
+                                   trip summary, client-hydrated; no longer a redirect (see below)
 /travellog/trips                  Trips (overview stats + cards)           [web]
 /travellog/checkins               Check-ins timeline                       [web]
 /travellog/checkins/import        Swarm import flow                        [web]
 /travellog/planner                Planner (trip picker)                    [web]
 /travellog/planner/[tripId]       Planner workspace (stops + day editor)   [web]
-/travellog/planner/[tripId]/mode  Trip Mode (day navigation)                [mobile only — Slice 3, deferred UI design]
+/travellog/planner/[tripId]/mode  Trip Mode (day navigation, T.19)          [mobile-first, no dedicated design pass yet — reachable and functional from any width; Trips' "Open Trip Mode" CTA (an ongoing trip) and Planner's own mobile-gated "Start Trip Mode" link both lead here]
+/travellog/checkin                Check-in creation (T.7) — search/GPS/manual, offline-queued (T.21) [mobile-first, top-level route outside ThreeColumnLayout]
 /travellog/settings               Settings (placeholder — no real content scoped yet) [web]
 ```
+
+**`/travellog`'s own history**: an unconditional `redirect('/travellog/checkins')` through `T.20`, changed to `redirect('/travellog/trips')` in the original plan once `T.13` shipped Trips for real (see the retired note this replaced) — but `T.21` found that a redirect *at all* can't satisfy the `offline: 'offline-first'` contract (the platform only precaches this exact route; a precached redirect into an uncached destination just fails again offline), so it's a real rendered shell now, not a redirect to anywhere.
 
 Trip/item detail is a **third-column state**, not a route — clicking a card
 or item sets local component state (matching `ThreeColumnLayout`'s

@@ -45,10 +45,15 @@ function metaLine(trip: TripCardData): string {
  * (`variant="primary"`, the default) — "it's the one action a user in the
  * middle of a trip actually wants" — every other status uses a plain text
  * link (`variant="ghost"`), deliberately less visually loud. "Open Trip
- * Mode" navigates to the Planner workspace here, not a real Trip Mode —
- * that surface is mobile-only and Slice-3-deferred (SPEC.md's Routes
- * section); web has no Trip Mode to open yet, so this is the closest real
- * destination until `T.15`/`T.16` ship.
+ * Mode" navigates to the real Trip Mode screen (`T.19`,
+ * `/travellog/planner/[tripId]/mode`) — not gated to mobile here the way
+ * Planner's own "Start Trip Mode" entry point is (`T.19`): that screen
+ * renders correctly at any width (confirmed live during `T.19`'s own
+ * verification), just without a dedicated design pass yet, and
+ * `CONCEPT.md`'s Trips section names no separate desktop destination for
+ * an ongoing trip's CTA to fall back to. `T.22` found this still pointed
+ * at the plain Planner workspace — a real Trip Mode route didn't exist
+ * when this shipped in `T.14`/`T.17`.
  *
  * Clicking the card body opens `T.14`'s detail column (`onSelect`) — the
  * CTA button is a nested, independently-clickable control, so its own click
@@ -117,7 +122,9 @@ export function TripCard({
           className={styles.cta}
           onClick={(e) => {
             e.stopPropagation();
-            router.push(`/travellog/planner/${trip.id}`);
+            router.push(
+              isOngoing ? `/travellog/planner/${trip.id}/mode` : `/travellog/planner/${trip.id}`,
+            );
           }}
         >
           {CTA_LABEL[trip.status]} →
