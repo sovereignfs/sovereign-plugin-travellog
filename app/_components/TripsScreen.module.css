@@ -1,0 +1,120 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-6);
+}
+
+.header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.overview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sv-space-3);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+  padding: var(--sv-space-3) var(--sv-space-4);
+  border: var(--sv-border-width-hairline) solid var(--sv-color-border);
+  border-radius: var(--sv-radius-md);
+  background: var(--sv-color-surface-raised);
+}
+
+.tileValue {
+  font-size: var(--sv-font-size-xl);
+  font-weight: 700;
+  color: var(--sv-color-text-primary);
+}
+
+.tileLabel {
+  font-size: var(--sv-font-size-xs);
+  color: var(--sv-color-text-muted);
+}
+
+.tileNext {
+  background: var(--sv-color-surface-sunken);
+}
+
+.tileNextLabel {
+  font-size: var(--sv-font-size-sm);
+  font-weight: 700;
+  color: var(--sv-color-text-primary);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sv-space-3);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sv-space-2);
+}
+
+.chip {
+  all: unset;
+  cursor: pointer;
+  padding: var(--sv-space-2) var(--sv-space-3);
+  border: var(--sv-border-width-hairline) solid var(--sv-color-border);
+  border-radius: var(--sv-radius-full);
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-subtle);
+  box-sizing: border-box;
+}
+
+.chip:hover {
+  background: var(--sv-color-surface-sunken);
+}
+
+.chipActive {
+  border-color: var(--sv-color-text-primary);
+  background: var(--sv-color-text-primary);
+  color: var(--sv-color-surface);
+}
+
+.search {
+  flex: 1;
+  min-width: 200px;
+  max-width: 320px;
+}
+
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-6);
+}
+
+.groupHeader {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sv-space-2);
+  margin-bottom: var(--sv-space-3);
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+}
+
+.groupCount {
+  font-weight: 400;
+  color: var(--sv-color-text-muted);
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--sv-space-4);
+}
+
+.noMatches {
+  color: var(--sv-color-text-muted);
+  font-size: var(--sv-font-size-sm);
+}

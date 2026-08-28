@@ -1,0 +1,38 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sv-space-2);
+  padding: var(--sv-space-4);
+  border: var(--sv-border-width-hairline) solid var(--sv-color-border);
+  border-radius: var(--sv-radius-lg);
+  background: var(--sv-color-surface-raised);
+}
+
+/* The one visually "loud" card — a bolder border, matching the wireframe's
+   stroke-width="1.5" treatment, echoing the CTA's own filled-vs-ghost split.
+   No `--sv-border-width-*` token beyond `hairline` exists today, so this is
+   a plain px bump on top of the token-driven colour/radius above it. */
+.cardOngoing {
+  border-color: var(--sv-color-text-primary);
+  border-width: 1.5px;
+}
+
+.name {
+  margin: 0;
+  font-size: var(--sv-font-size-lg);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+}
+
+.meta {
+  margin: 0;
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-muted);
+}
+
+.cta {
+  margin-top: var(--sv-space-2);
+  padding-left: 0;
+  padding-right: 0;
+}

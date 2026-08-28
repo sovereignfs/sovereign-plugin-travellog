@@ -7,12 +7,91 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.12` shipped, manifest at `0.14.0` (`T.5a`, slot
-`0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block `T.6`–`T.12`).
-Slice 1 (web) is feature-complete; Slice 2's data model, server layer, and
-auto-link engine now all exist. `T.13` (Trips screen) is next, the first
-task with a full screen for a user to actually see — though `T.12` itself
-already shipped one small, real, live-verified UI touchpoint (below).
+🚧 In progress — `T.1`–`T.13` shipped, manifest at `0.15.0` (`T.5a`, slot
+`0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block `T.6`–`T.13`).
+Slice 1 (web) is feature-complete; Slice 2's data model, server layer,
+auto-link engine, and now Trips screen all exist. `T.14` (trip detail panel
+& sharing) is next.
+
+**`T.13` — Trips screen (web): overview & cards (`0.15.0`).** The
+browse/manage hub from `docs/adhoc/web-trips.md` screens 1, 2, and 4 — an
+overview strip (trip counts by status, unique places/countries, total
+check-ins, next-trip countdown), trip cards grouped by computed status
+(Planning first) and sorted within each group, status-chip + name-search
+filtering, and a "Create trip" modal. Card-click-to-detail and trip sharing
+are `T.14`'s job, deliberately not built here — confirmed against
+`SPEC.md`'s own task list, `CONCEPT.md`'s Trips section, and the wireframe
+doc's own "Phasing" note before starting, so no dead detail-column
+affordance got built early.
+
+Built: `_lib/dates.ts` extended with `daysBetweenDateKeys` and
+`formatDateRange` (both following the same UTC-noon-anchored,
+DST-immune arithmetic `T.11` established); `_lib/queries.ts`'s
+`getTripsOverview` (tallies every trip's `resolveTripStatus` from `T.11`
+into per-status counts, aggregates unique places/countries/check-ins across
+`visits`/`places` in one query, and picks the soonest `upcoming` trip for
+the next-trip highlight) and `listTripCards` (one unpaginated fetch — a
+personal trip list is small and bounded, unlike check-in history, so all
+filtering happens client-side over a single payload); `TripCard.tsx` +
+`TripsScreen.tsx` (the filtering/grouping client component) +
+`CreateTripDialog.tsx`; and a new `app/(home)/planner/[tripId]/page.tsx`
+placeholder so "create a trip and land in Planner for it" has a real,
+non-404 destination ahead of `T.15` — the same "build the hook point now,
+wire the real thing later" precedent as `T.6`'s Unlink button.
+
+**Two DS-first component choices reversed after checking against the
+wireframe's own stated constraints, not just picked at a glance:**
+
+- `SegmentedControl` was the obvious first reach for the status filter
+  chips, but its own doc comment describes a "pill-based 2–3 option picker"
+  with a connected visual track — the wireframe shows four separate,
+  individually-outlined pill chips, a materially different visual. Built as
+  plain plugin-local `<button role="radio">` elements instead, matching this
+  repo's existing precedent (`CheckinsTimeline.tsx`'s row/badge treatment)
+  for narrow patterns that don't match an existing DS component.
+- `Badge variant="status"` was used for the Ongoing card's status badge in
+  an early draft, then reverted after re-reading the wireframe doc's
+  explicit constraint: "No color-coded status badges... status is
+  distinguished by badge text and the Ongoing card's filled-vs-outline CTA
+  treatment" — `variant="status"` renders a colored dot per status,
+  directly contradicting that. Switched to plain `Badge variant="mono"` for
+  all four statuses, with the CTA button's `primary`/`ghost` variant
+  carrying the Ongoing distinction instead, exactly as the wireframe
+  specifies.
+
+**One real ESLint catch, not just a style nit:** `CreateTripDialog.tsx`'s
+`Input` initially had `autoFocus`, flagged by `jsx-a11y/no-autofocus`.
+Removed rather than disabled — `Dialog` already handles focus management,
+so it was redundant as well as a real accessibility smell.
+
+Data-layer tests (`dates.test.ts`, `queries.test.ts`) surfaced two small,
+quickly-fixed issues, no logic bugs in the new query functions themselves: a
+missing `eq` import in a new `queries.test.ts` test, and one test's own
+wrong expected `dayCount` (`5` instead of `6`) for two overlapping 3-day
+stops sharing a handover date — corrected once traced through the schema
+(`trip_days` rows are unique per `(stop_id, date)`, not `(trip_id, date)`,
+so the shared date legitimately produces two rows, one per stop).
+
+**Live-verified end to end**, including states no existing seed data
+covers: since Planner (`T.15`) doesn't exist yet to create stops through
+the UI, three additional trips — one each in `upcoming`/`ongoing`/
+`completed` status — were seeded directly into the dev database (the same
+technique `T.9`/`T.12` used), confirming all four status groups, the
+overview tallies, the next-trip countdown, the "day 3 of 5"-style ongoing
+meta line, and exact date-range formatting all rendered correctly on the
+first attempt. Also verified: the empty state plus its "Create trip" flow
+(including the dialog's pending/loading label), each status filter chip in
+isolation, name search narrowing to a single match, and the "No trips match
+your filters." empty-filter state for a deliberately-non-matching query.
+Fresh-tab console checked clean throughout. The three seeded trips were
+deleted from the dev database afterward, leaving only the one trip created
+through the real Create Trip flow during this same verification pass.
+
+Full check suite clean: `format:check`, `lint`, this package's `typecheck`,
+`design:tokens:check`, and all 278 travellog tests (264 existing + 14 new:
+4 in `dates.test.ts` for `formatDateRange`, 10 across two new
+`describe` blocks in `queries.test.ts` for `getTripsOverview`/
+`listTripCards`) pass.
 
 **`T.12` — Auto-link engine (`0.14.0`).** The date-window auto-link from
 SPEC.md's Data model section, running on both new check-ins and existing

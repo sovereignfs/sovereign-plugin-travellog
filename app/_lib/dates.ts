@@ -99,3 +99,27 @@ export function daysBetweenDateKeys(startKey: string, endKey: string): number {
 export function todayDateKey(): string {
   return toDateKey(new Date());
 }
+
+/**
+ * `T.13`'s trip-card date range, e.g. `"Sep 14–18"` (same month/year) or
+ * `"Aug 30 – Sep 2"` (crossing a month boundary) or `"Dec 30, 2026 – Jan 2, 2027"`
+ * (crossing a year boundary). UTC-noon anchored for the same reason every
+ * other function here is — see file header.
+ */
+export function formatDateRange(startKey: string, endKey: string): string {
+  const start = toUtcNoon(startKey);
+  const end = toUtcNoon(endKey);
+  const sameYear = start.getUTCFullYear() === end.getUTCFullYear();
+  const sameMonth = sameYear && start.getUTCMonth() === end.getUTCMonth();
+
+  const dayOnly = (d: Date) =>
+    d.toLocaleDateString(undefined, { day: 'numeric', timeZone: 'UTC' });
+  const monthDay = (d: Date) =>
+    d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const monthDayYear = (d: Date) =>
+    d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+
+  if (sameMonth) return `${monthDay(start)}–${dayOnly(end)}`;
+  if (sameYear) return `${monthDay(start)} – ${monthDay(end)}`;
+  return `${monthDayYear(start)} – ${monthDayYear(end)}`;
+}

@@ -1,8 +1,18 @@
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as schema from '../../_db/schema';
 import { createTestDb, type TestDb } from '../../_db/__tests__/test-db';
 import { createPlace } from '../places';
+import { createStop } from '../stops';
+import { createTrip } from '../trips';
 import { createVisit } from '../visits';
-import { getVisitDetail, getVisitTimelinePage, VISIT_TIMELINE_PAGE_SIZE } from '../queries';
+import {
+  getTripsOverview,
+  getVisitDetail,
+  getVisitTimelinePage,
+  listTripCards,
+  VISIT_TIMELINE_PAGE_SIZE,
+} from '../queries';
 
 const actor = { tenantId: 'tenant-1', userId: 'user-1' };
 const otherUserSameTenant = { tenantId: 'tenant-1', userId: 'user-2' };
@@ -222,5 +232,152 @@ describe('getVisitDetail', () => {
     });
 
     expect((await getVisitDetail(t.travellog, actor, mine.id))?.placeVisitCount).toBe(1);
+  });
+});
+
+describe('getTripsOverview (T.13, payload 1)', () => {
+  it('returns zeroed counts and no next trip when the caller has nothing at all', async () => {
+    const overview = await getTripsOverview(t.travellog, actor, '2026-06-01');
+    expect(overview).toEqual({
+      tripCounts: { planning: 0, upcoming: 0, ongoing: 0, completed: 0 },
+      uniquePlaceCount: 0,
+      uniqueCountryCount: 0,
+      totalCheckins: 0,
+      nextTrip: null,
+    });
+  });
+
+  it('tallies trips into all four computed statuses', async () => {
+    await createTrip(t.travellog, actor, 'No stops yet'); // planning
+    const upcoming = await createTrip(t.travellog, actor, 'Upcoming trip');
+    await createStop(t.travellog, upcoming.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    const ongoing = await createTrip(t.travellog, actor, 'Ongoing trip');
+    await createStop(t.travellog, ongoing.id, { placeId, arriveDate: '2026-05-30', departDate: '2026-06-02' });
+    const completed = await createTrip(t.travellog, actor, 'Completed trip');
+    await createStop(t.travellog, completed.id, { placeId, arriveDate: '2026-05-01', departDate: '2026-05-03' });
+
+    const overview = await getTripsOverview(t.travellog, actor, '2026-06-01');
+    expect(overview.tripCounts).toEqual({ planning: 1, upcoming: 1, ongoing: 1, completed: 1 });
+  });
+
+  it('counts unique places/countries/check-ins from visits, not trip stops', async () => {
+    const now = Date.now();
+    await t.db.insert(schema.places).values({
+      id: 'place-2',
+      tenantId: actor.tenantId,
+      name: 'Torre de Belém',
+      country: 'Portugal',
+      source: 'manual',
+      createdBy: actor.userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await t.db.insert(schema.places).values({
+      id: 'place-3',
+      tenantId: actor.tenantId,
+      name: 'No-country place',
+      country: null,
+      source: 'manual',
+      createdBy: actor.userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    // placeId itself has no country set by default — give it one for this test.
+    await t.db.update(schema.places).set({ country: 'Portugal' }).where(eq(schema.places.id, placeId));
+
+    await createVisit(t.travellog, actor, { placeId, happenedAt: now, tzIana: 'UTC', tzOffsetMinutes: 0, source: 'manual' });
+    await createVisit(t.travellog, actor, { placeId: 'place-2', happenedAt: now, tzIana: 'UTC', tzOffsetMinutes: 0, source: 'manual' });
+    await createVisit(t.travellog, actor, { placeId: 'place-3', happenedAt: now, tzIana: 'UTC', tzOffsetMinutes: 0, source: 'manual' });
+    // A second visit to the same place — must not double-count uniquePlaceCount.
+    await createVisit(t.travellog, actor, { placeId, happenedAt: now, tzIana: 'UTC', tzOffsetMinutes: 0, source: 'manual' });
+
+    const overview = await getTripsOverview(t.travellog, actor, '2026-06-01');
+    expect(overview.totalCheckins).toBe(4);
+    expect(overview.uniquePlaceCount).toBe(3);
+    expect(overview.uniqueCountryCount).toBe(1); // "Portugal" only — the null-country place doesn't count
+  });
+
+  it('surfaces the soonest upcoming trip, not just any upcoming trip', async () => {
+    const farther = await createTrip(t.travellog, actor, 'Later trip');
+    await createStop(t.travellog, farther.id, { placeId, arriveDate: '2026-08-01', departDate: '2026-08-03' });
+    const sooner = await createTrip(t.travellog, actor, 'Sooner trip');
+    await createStop(t.travellog, sooner.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+
+    const overview = await getTripsOverview(t.travellog, actor, '2026-06-01');
+    expect(overview.nextTrip).toEqual({ id: sooner.id, name: 'Sooner trip', daysUntil: 9 });
+  });
+
+  it('scopes everything to the caller — another user’s trips/visits never count', async () => {
+    const otherActor = { tenantId: 'tenant-1', userId: 'user-2' };
+    const theirTrip = await createTrip(t.travellog, otherActor, 'Not mine');
+    await createStop(t.travellog, theirTrip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    await createVisit(t.travellog, otherActor, {
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'UTC',
+      tzOffsetMinutes: 0,
+      source: 'manual',
+    });
+
+    const overview = await getTripsOverview(t.travellog, actor, '2026-06-01');
+    expect(overview.tripCounts).toEqual({ planning: 0, upcoming: 0, ongoing: 0, completed: 0 });
+    expect(overview.totalCheckins).toBe(0);
+  });
+});
+
+describe('listTripCards (T.13, payload 2)', () => {
+  it('returns an empty array when the caller has no trips', async () => {
+    expect(await listTripCards(t.travellog, actor)).toEqual([]);
+  });
+
+  it('includes a trip with no stops yet, with null dates and no destination summary', async () => {
+    await createTrip(t.travellog, actor, 'Someday trip');
+    const [card] = await listTripCards(t.travellog, actor);
+    expect(card).toMatchObject({
+      name: 'Someday trip',
+      status: 'planning',
+      startDate: null,
+      endDate: null,
+      stopCount: 0,
+      dayCount: 0,
+      destinationSummary: null,
+    });
+  });
+
+  it('summarizes the destination as the first stop’s place, plus a count of the rest', async () => {
+    const now = Date.now();
+    await t.db.insert(schema.places).values({
+      id: 'place-2',
+      tenantId: actor.tenantId,
+      name: 'Porto',
+      source: 'manual',
+      createdBy: actor.userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
+    await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    await createStop(t.travellog, trip.id, { placeId: 'place-2', arriveDate: '2026-06-12', departDate: '2026-06-14' });
+
+    const [card] = await listTripCards(t.travellog, actor);
+    expect(card?.destinationSummary).toBe('Belém Tower +1');
+    expect(card?.stopCount).toBe(2);
+    // trip_days are unique per (stop_id, date), not (trip_id, date) — the
+    // shared handover date (06-12) gets one row per stop, not one shared
+    // row, so this is 3 + 3 = 6, not 5.
+    expect(card?.dayCount).toBe(6);
+  });
+
+  it('a single-stop trip has no "+N" suffix', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Weekend trip');
+    await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    const [card] = await listTripCards(t.travellog, actor);
+    expect(card?.destinationSummary).toBe('Belém Tower');
+  });
+
+  it('scopes to the caller — another user’s trips never appear', async () => {
+    const otherActor = { tenantId: 'tenant-1', userId: 'user-2' };
+    await createTrip(t.travellog, otherActor, 'Not mine');
+    expect(await listTripCards(t.travellog, actor)).toEqual([]);
   });
 });

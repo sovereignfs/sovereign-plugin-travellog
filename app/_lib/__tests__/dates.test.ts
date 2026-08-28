@@ -3,6 +3,7 @@ import {
   addDaysToDateKey,
   compareDateKeys,
   enumerateDateKeys,
+  formatDateRange,
   isValidDateKey,
   todayDateKey,
 } from '../dates';
@@ -104,5 +105,23 @@ describe('enumerateDateKeys (T.11 review checklist: "a 5-day stop produces 5 tri
 describe('todayDateKey', () => {
   it('returns a well-formed date key', () => {
     expect(isValidDateKey(todayDateKey())).toBe(true);
+  });
+});
+
+describe('formatDateRange (T.13 trip cards)', () => {
+  it('formats a same-month range as "Mon D–D"', () => {
+    expect(formatDateRange('2026-09-14', '2026-09-18')).toBe('Sep 14–18');
+  });
+
+  it('formats a cross-month, same-year range as "Mon D – Mon D"', () => {
+    expect(formatDateRange('2026-08-30', '2026-09-02')).toBe('Aug 30 – Sep 2');
+  });
+
+  it('formats a cross-year range with both years shown', () => {
+    expect(formatDateRange('2026-12-30', '2027-01-02')).toBe('Dec 30, 2026 – Jan 2, 2027');
+  });
+
+  it('formats a single-day range with both endpoints equal', () => {
+    expect(formatDateRange('2026-06-10', '2026-06-10')).toBe('Jun 10–10');
   });
 });

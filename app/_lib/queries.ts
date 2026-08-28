@@ -5,10 +5,12 @@
  * authz call to keep "reading someone else's visit is impossible" true
  * (`T.4`'s review checklist).
  */
-import { and, asc, count, desc, eq, inArray, lt, or } from 'drizzle-orm';
+import { and, asc, count, countDistinct, desc, eq, inArray, lt, or } from 'drizzle-orm';
 import type { TravellogDb } from '../_db/client';
 import * as schema from '../_db/schema';
 import type { Actor } from './authz';
+import { compareDateKeys, daysBetweenDateKeys, todayDateKey } from './dates';
+import { resolveTripStatus, type TripStatus } from './trip-status';
 
 const NOTE_EXCERPT_LENGTH = 140;
 
@@ -226,4 +228,155 @@ export async function getVisitDetail(
     placeVisitCount: placeVisitCountRow[0]?.value ?? 1,
     photos: photos.map((p) => ({ id: p.id, storageKey: p.storageKey, position: p.position })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Trips overview (T.13, payload 1)
+
+export interface TripsOverview {
+  tripCounts: Record<TripStatus, number>;
+  /** Distinct places across every visit the caller has ever logged — the whole check-in history, not trip stops. */
+  uniquePlaceCount: number;
+  /** Distinct `places.country` across the same visits — nulls (no country on the place) never count. */
+  uniqueCountryCount: number;
+  totalCheckins: number;
+  /** The soonest `upcoming` trip, or null when none is — CONCEPT.md's "next trip in N days" highlight. */
+  nextTrip: { id: string; name: string; daysUntil: number } | null;
+}
+
+/**
+ * Status is computed here (`resolveTripStatus`, `T.11`), not in SQL — every
+ * trip a caller owns is a small, bounded list (unlike check-in history,
+ * which can span a decade of imports), so fetching every trip row and
+ * tallying statuses in application code is simpler than a per-row SQL CASE
+ * expression, while the genuinely large-cardinality aggregates (unique
+ * places/countries/check-ins, all scale with check-in history) stay real
+ * SQL `COUNT`/`COUNT DISTINCT` — never fetched row-by-row to compute
+ * client-side (SPEC.md's Data fetching contract).
+ */
+export async function getTripsOverview(
+  db: TravellogDb,
+  actor: Actor,
+  todayKey: string = todayDateKey(),
+): Promise<TripsOverview> {
+  const [trips, [visitAgg]] = await Promise.all([
+    db
+      .select({ id: schema.trips.id, name: schema.trips.name, startDate: schema.trips.startDate, endDate: schema.trips.endDate })
+      .from(schema.trips)
+      .where(and(eq(schema.trips.ownerId, actor.userId), eq(schema.trips.tenantId, actor.tenantId))),
+    db
+      .select({
+        totalCheckins: count(),
+        uniquePlaceCount: countDistinct(schema.visits.placeId),
+        uniqueCountryCount: countDistinct(schema.places.country),
+      })
+      .from(schema.visits)
+      .innerJoin(schema.places, eq(schema.places.id, schema.visits.placeId))
+      .where(and(eq(schema.visits.userId, actor.userId), eq(schema.visits.tenantId, actor.tenantId))),
+  ]);
+
+  const tripCounts: Record<TripStatus, number> = { planning: 0, upcoming: 0, ongoing: 0, completed: 0 };
+  let nextTrip: TripsOverview['nextTrip'] = null;
+  let nextTripStartDate: string | null = null;
+
+  for (const trip of trips) {
+    const hasStops = trip.startDate !== null && trip.endDate !== null;
+    const status = resolveTripStatus({ hasStops, startDate: trip.startDate, endDate: trip.endDate }, todayKey);
+    tripCounts[status]++;
+
+    if (status === 'upcoming' && trip.startDate) {
+      if (!nextTripStartDate || compareDateKeys(trip.startDate, nextTripStartDate) < 0) {
+        nextTripStartDate = trip.startDate;
+        nextTrip = { id: trip.id, name: trip.name, daysUntil: daysBetweenDateKeys(todayKey, trip.startDate) };
+      }
+    }
+  }
+
+  return {
+    tripCounts,
+    uniquePlaceCount: visitAgg?.uniquePlaceCount ?? 0,
+    uniqueCountryCount: visitAgg?.uniqueCountryCount ?? 0,
+    totalCheckins: visitAgg?.totalCheckins ?? 0,
+    nextTrip,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Trip cards (T.13, payload 2)
+
+export interface TripCard {
+  id: string;
+  name: string;
+  status: TripStatus;
+  startDate: string | null;
+  endDate: string | null;
+  stopCount: number;
+  /** Total `trip_days` rows across all of the trip's stops. */
+  dayCount: number;
+  /** First stop's place name, plus a count of any additional stops (e.g. "Lisbon +2") — null for a trip with no stops yet. */
+  destinationSummary: string | null;
+}
+
+/**
+ * Not paginated, deliberately — a personal trip list is small and bounded
+ * (unlike check-in history), and the wireframe (`docs/adhoc/web-trips.md`)
+ * filters client-side over one already-fetched page. Three queries total
+ * regardless of trip count (trips, their stops+place-names, their day
+ * counts) — never N+1 per trip.
+ */
+export async function listTripCards(db: TravellogDb, actor: Actor): Promise<TripCard[]> {
+  const trips = await db
+    .select({ id: schema.trips.id, name: schema.trips.name, startDate: schema.trips.startDate, endDate: schema.trips.endDate })
+    .from(schema.trips)
+    .where(and(eq(schema.trips.ownerId, actor.userId), eq(schema.trips.tenantId, actor.tenantId)));
+
+  if (trips.length === 0) return [];
+  const tripIds = trips.map((t) => t.id);
+
+  const [stopRows, dayCountRows] = await Promise.all([
+    db
+      .select({
+        tripId: schema.stops.tripId,
+        position: schema.stops.position,
+        placeName: schema.places.name,
+      })
+      .from(schema.stops)
+      .innerJoin(schema.places, eq(schema.places.id, schema.stops.placeId))
+      .where(inArray(schema.stops.tripId, tripIds))
+      .orderBy(asc(schema.stops.position)),
+    db
+      .select({ tripId: schema.tripDays.tripId, dayCount: count() })
+      .from(schema.tripDays)
+      .where(inArray(schema.tripDays.tripId, tripIds))
+      .groupBy(schema.tripDays.tripId),
+  ]);
+
+  const stopsByTrip = new Map<string, { placeName: string }[]>();
+  for (const row of stopRows) {
+    const list = stopsByTrip.get(row.tripId) ?? [];
+    list.push({ placeName: row.placeName });
+    stopsByTrip.set(row.tripId, list);
+  }
+  const dayCountByTrip = new Map(dayCountRows.map((r) => [r.tripId, r.dayCount]));
+
+  const todayKey = todayDateKey();
+  return trips.map((trip) => {
+    const stops = stopsByTrip.get(trip.id) ?? [];
+    const first = stops[0];
+    const hasStops = trip.startDate !== null && trip.endDate !== null;
+    return {
+      id: trip.id,
+      name: trip.name,
+      status: resolveTripStatus({ hasStops, startDate: trip.startDate, endDate: trip.endDate }, todayKey),
+      startDate: trip.startDate,
+      endDate: trip.endDate,
+      stopCount: stops.length,
+      dayCount: dayCountByTrip.get(trip.id) ?? 0,
+      destinationSummary: first
+        ? stops.length > 1
+          ? `${first.placeName} +${String(stops.length - 1)}`
+          : first.placeName
+        : null,
+    };
+  });
 }

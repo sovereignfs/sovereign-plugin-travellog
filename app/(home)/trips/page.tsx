@@ -1,15 +1,25 @@
-import { EmptyState, PageContainer, PageHeader } from '@sovereignfs/ui';
+import { PageContainer, PageHeader } from '@sovereignfs/ui';
+import { TripsScreen } from '../../_components/TripsScreen';
+import { requireUser } from '../../_lib/authz';
+import { getDb } from '../../_lib/db';
+import { getTripsOverview, listTripCards } from '../../_lib/queries';
 
-/** Placeholder — T.13 replaces this with the overview stats + status-grouped cards. */
-export default function TripsPage() {
+/**
+ * `T.13`'s real Trips screen — a Server Component fetching both payloads
+ * (overview stats, card list) directly, same pattern as Check-ins'
+ * `page.tsx`: no client round trip for the initial load, since filtering
+ * is entirely client-side over this one fetch (`docs/adhoc/web-trips.md`).
+ * Card-click-to-detail is `T.14`'s deliverable, not built here.
+ */
+export default async function TripsPage() {
+  const actor = await requireUser();
+  const db = await getDb();
+  const [overview, cards] = await Promise.all([getTripsOverview(db, actor), listTripCards(db, actor)]);
+
   return (
-    <PageContainer maxWidth="lg">
+    <PageContainer maxWidth="full">
       <PageHeader title="Trips" />
-      <EmptyState
-        icon="luggage"
-        heading="Trip planning is coming soon"
-        description="Browse and manage your trips here once T.13 ships."
-      />
+      <TripsScreen overview={overview} cards={cards} />
     </PageContainer>
   );
 }

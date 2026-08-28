@@ -154,10 +154,10 @@ Don't invent detail here ahead of its own pass — flag it and ask instead:
 
 ## Status
 
-Current manifest version: `0.14.0` (`T.1`–`T.12` shipped — Slice 1 web is
-feature-complete; Slice 2's data model, server layer, and auto-link engine
-now exist, with one small but real UI touchpoint — the Check-ins detail
-column's Unlink action — live. `T.13` (Trips screen) is next, the first
-task with a full screen for a user to actually see). Task history and the
-reasoning behind every completed task lives in `SPEC.md`'s `Status`
-section — that's the changelog; don't duplicate it here.
+Current manifest version: `0.15.0` (`T.1`–`T.13` shipped — Slice 1 web is
+feature-complete; Slice 2's data model, server layer, auto-link engine, and
+now the Trips screen (overview stats, status-grouped/filterable cards,
+create-trip flow) all exist. `T.14` (trip detail panel & sharing) is next).
+Task history and the reasoning behind every completed task lives in
+`SPEC.md`'s `Status` section — that's the changelog; don't duplicate it
+here.
