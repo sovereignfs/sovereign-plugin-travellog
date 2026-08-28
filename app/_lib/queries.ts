@@ -394,3 +394,101 @@ export async function listTripCards(db: TravellogDb, actor: Actor): Promise<Trip
     };
   });
 }
+
+// ---------------------------------------------------------------------------
+// Trip picker (T.15, payload 6)
+
+export interface TripPickerEntry {
+  id: string;
+  name: string;
+  status: TripStatus;
+  startDate: string | null;
+  endDate: string | null;
+  stopCount: number;
+}
+
+/**
+ * `planning`/`upcoming` trips only — an already-completed (or ongoing)
+ * trip's itinerary is edited from Trips instead (`docs/adhoc/web-planner.md`
+ * screen 1). A lighter fetch than `listTripCards`: no stop/place join for a
+ * destination summary and no day count, since the picker only ever shows a
+ * stop count — those extra joins would be pure waste here.
+ */
+export async function listTripsForPicker(db: TravellogDb, actor: Actor): Promise<TripPickerEntry[]> {
+  const trips = await db
+    .select({ id: schema.trips.id, name: schema.trips.name, startDate: schema.trips.startDate, endDate: schema.trips.endDate })
+    .from(schema.trips)
+    .where(and(eq(schema.trips.ownerId, actor.userId), eq(schema.trips.tenantId, actor.tenantId)));
+
+  if (trips.length === 0) return [];
+  const tripIds = trips.map((t) => t.id);
+
+  const stopCountRows = await db
+    .select({ tripId: schema.stops.tripId, stopCount: count() })
+    .from(schema.stops)
+    .where(inArray(schema.stops.tripId, tripIds))
+    .groupBy(schema.stops.tripId);
+  const stopCountByTrip = new Map(stopCountRows.map((r) => [r.tripId, r.stopCount]));
+
+  const todayKey = todayDateKey();
+  const entries: TripPickerEntry[] = [];
+  for (const trip of trips) {
+    const hasStops = trip.startDate !== null && trip.endDate !== null;
+    const status = resolveTripStatus({ hasStops, startDate: trip.startDate, endDate: trip.endDate }, todayKey);
+    if (status !== 'planning' && status !== 'upcoming') continue;
+    entries.push({
+      id: trip.id,
+      name: trip.name,
+      status,
+      startDate: trip.startDate,
+      endDate: trip.endDate,
+      stopCount: stopCountByTrip.get(trip.id) ?? 0,
+    });
+  }
+  return entries;
+}
+
+// ---------------------------------------------------------------------------
+// Planner workspace (T.15, payload 7's stop list)
+
+export interface WorkspaceStop {
+  id: string;
+  placeName: string;
+  arriveDate: string;
+  departDate: string;
+}
+
+/**
+ * The place-enriched sibling of `_lib/stops.ts`'s `listStops` — that one
+ * returns raw `StopRow`s (no place name) for mutation call sites that don't
+ * need one; `PlannerStopStrip` renders a place name per chip, so this joins
+ * `places` too. Actor-scoped via a join to `trips`, matching this file's own
+ * "every query is ownership-scoped in its own WHERE clause" invariant, even
+ * though the caller (`planner/[tripId]/page.tsx`) already resolves the trip
+ * through `requireTripOwner` first — cheap defense in depth, not load-bearing.
+ */
+export async function listWorkspaceStops(
+  db: TravellogDb,
+  actor: Actor,
+  tripId: string,
+): Promise<WorkspaceStop[]> {
+  const rows = await db
+    .select({
+      id: schema.stops.id,
+      placeName: schema.places.name,
+      arriveDate: schema.stops.arriveDate,
+      departDate: schema.stops.departDate,
+    })
+    .from(schema.stops)
+    .innerJoin(schema.places, eq(schema.places.id, schema.stops.placeId))
+    .innerJoin(schema.trips, eq(schema.trips.id, schema.stops.tripId))
+    .where(
+      and(
+        eq(schema.stops.tripId, tripId),
+        eq(schema.trips.ownerId, actor.userId),
+        eq(schema.trips.tenantId, actor.tenantId),
+      ),
+    )
+    .orderBy(asc(schema.stops.position));
+  return rows;
+}

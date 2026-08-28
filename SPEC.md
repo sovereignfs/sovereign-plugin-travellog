@@ -7,12 +7,169 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.14` shipped, manifest at `0.16.0` (`T.5a`, slot
-`0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block `T.6`–`T.14`).
-Slice 1 (web) is feature-complete; Slice 2's data model, server layer,
-auto-link engine, and now the full Trips screen (overview, cards, and
-click-to-detail) all exist. `T.15` (Planner: trip picker & stop workspace)
-is next.
+🚧 In progress — `T.1`–`T.15` shipped, manifest at `0.17.0` (`T.5a`, slot
+`0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block
+`T.6`–`T.15`). Slice 1 (web) is feature-complete; Slice 2's data model,
+server layer, auto-link engine, Trips screen, and now Planner's trip picker
+and stop workspace shell all exist. `T.16` (Planner: day-by-day itinerary
+editor) is next.
+
+**`T.15` — Planner: trip picker & stop workspace (`0.17.0`).**
+`docs/adhoc/web-planner.md` screens 1 (picker), 3 (no-stops-yet workspace),
+and 4 (add-stop dialog) — screens 2 and 5 (the populated day-by-day list and
+itinerary-item detail) are `T.16`'s job, deliberately not built here.
+
+**New DS component, not a plugin-local one-off:** `StepStrip`
+(`packages/ui/src/components/StepStrip`). The wireframe's own engineering
+note flagged the stop timeline strip (a horizontal connected-chip row) as a
+possible design-system gap and said to "raise it as a design system
+proposal" rather than build it plugin-locally — checked
+`packages/ui/src/components/` first per DS-first, confirmed nothing fit,
+and built it in `packages/ui` instead of here. Deliberately presentational
+only: `items`/`activeId`/an optional trailing `onAdd` chip, plus a
+`renderItem(item, {isActive}) => ReactNode` render prop that owns each
+chip's content, click handling, and (if the consumer needs it) drag-reorder
+wiring — the same "DS owns chrome, consumer wires dnd-kit via passed-through
+props" split `DragHandleRow` already established for vertical lists,
+generalized here for a horizontal, handle-less strip where the whole
+rendered item, not a separate handle icon, is both the click target and the
+drag surface. Story (`packages/ui/src/stories/StepStrip.stories.tsx`,
+default + no-add-affordance variants) and a `DesignSystemOverview.stories.tsx`
+gallery entry added per Storybook hygiene; `pnpm --filter @sovereignfs/ui
+typecheck` and a full `build-storybook` both clean. `@sovereignfs/ui` bumped
+`0.72.0` → `0.73.0` (minor, purely additive) — **this and the component
+itself are platform-repo (`packages/ui`) changes, left uncommitted in that
+repo**, consistent with this session's established scope: only the
+travellog plugin repo gets committed/pushed here, not the platform monorepo.
+
+**A real, deliberate deviation from the wireframe, made before writing any
+code, not discovered by a bug:** the wireframe's screen 4 (add-stop dialog)
+shows both dates as optional ("leave dates blank for now"). `T.10`'s already-
+shipped schema has `travellog_stops.arrive_date`/`depart_date` as `NOT
+NULL`, and `_lib/stops.ts`'s `recomputeTripDatesAndAutoLinks` (`T.11`) and
+`resolveTripStatus`'s own documented invariant ("`startDate` — null iff
+`hasStops` is false," `T.11`) are built on "a stop with dates always has a
+real, complete range." Retrofitting nullable stop dates would mean
+revisiting three already-shipped tasks' data model and logic for a UI
+nicety — out of proportion for what this task needs. `AddStopDialog` makes
+both dates required fields instead, with `Depart`'s `DatePicker` given
+`minDate={arrive}` so an invalid range can't be picked in the first place,
+plus the same inline `compareDateKeys` check `_lib/stops.ts`'s `createStop`
+already does server-side, so the wireframe's own stated "Error (expected):
+depart before arrive" case still surfaces before a round trip.
+
+Built: `_lib/queries.ts`'s `listTripsForPicker` (payload 6 — lighter than
+`listTripCards`, no destination-summary/day-count joins the picker never
+renders) and `listWorkspaceStops` (payload 7's stop list, place-enriched);
+`PlannerPicker.tsx` (the picker screen, reusing `CreateTripDialog`
+unmodified — it already navigates into the new trip's Planner page on
+success); `AddStopDialog.tsx` (place search is the exact same
+`searchPlacesAction`/`SuggestionInput` flow as check-in's, `T.3`/`T.7`, just
+scoped down — no GPS "check in here" path, since planning a stop isn't tied
+to the planner's own physical location); `PlannerStopStrip.tsx` (wires
+`StepStrip` to real drag-reorder: `dnd-kit`, `PointerSensor` at a 6px
+activation distance, no handle — the same pattern as `sovereign-plugin-kanban`'s
+`CardTile` drag, matching CLAUDE.md's own "Ordering... match
+sovereign-plugin-kanban's approach" convention); `PlannerWorkspace.tsx`
+(owns `activeStopId` and the one `AddStopDialog` instance both the
+empty-state prompt and the strip's trailing chip open — one add-a-stop flow
+regardless of entry point); `app/(home)/planner/page.tsx` and
+`.../planner/[tripId]/page.tsx` replace their `T.13`-era placeholders.
+
+**A real hydration bug, found live via the dev error overlay, not by any
+check:** `PlannerStopStrip`'s `DndContext` had no explicit `id`. Without
+one, `dnd-kit`'s internal `aria-describedby` id comes from a global
+mount-order counter — SSR (always starting fresh at 0 for its own isolated
+render) and the client (already incremented by any other `DndContext`
+mounted earlier in the page's lifetime, e.g. across HMR remounts in dev)
+can disagree on that counter, producing a real, if cosmetic, "hydrated but
+some attributes... didn't match" mismatch. `sovereign-plugin-kanban`'s own
+`DndContext` already carries an explicit `id="kanban-board-dnd"` for
+exactly this reason — matched here with `id="planner-stop-strip-dnd"`.
+Confirmed fixed by direct DOM inspection (`aria-describedby` reads the
+stable custom id, matching across every chip) rather than trusting the
+console log, which turned out to have its own quirk — see below.
+
+**Live-verification technique notes, both real findings about the tooling
+in this environment, not the app:**
+
+- **The Browser pane's `computer` tool's coordinate/ref-based clicks were
+  confirmed unreliable for several interactions this task** (a picker row's
+  "Open →" link, a place-search suggestion's `onMouseDown` row, a
+  `DatePicker` calendar cell) — `document.elementFromPoint`/`activeElement`
+  checks confirmed the click was landing on the *correct* element but not
+  always registering. Diagnosed before assuming any of it was a product
+  bug, and worked around throughout via `javascript_exec`-dispatched real
+  events (`element.click()` for buttons; the native `HTMLInputElement`
+  value setter + a dispatched `input` event, focus-checked, for controlled
+  text fields) — the same "script it instead" fallback
+  `sovereign-plugin-kanban`'s own CLAUDE.md already documents for
+  drag-specific verification, found here to generalize to plain clicks too
+  in this session's environment.
+- **The console-message tool returns stale/buffered entries that don't
+  reflect the current DOM state**, confirmed twice: a `Module not found:
+  ./loading.module.css` error kept reappearing across hard reloads long
+  after `read_network_requests` proved the same CSS chunk resolving `200
+  OK` on the most recent request; the `DndContext` hydration mismatch above
+  kept reappearing (still showing the pre-fix `DndDescribedBy-N` value)
+  after the fix had already landed and a direct DOM check confirmed the
+  stable id was live. Both resolved by trusting direct, current-state
+  checks (network responses, live DOM attributes) over the console buffer
+  once the discrepancy was noticed — a real quirk of this session's tooling
+  worth remembering, not a reason to distrust every console error going
+  forward.
+- **Drag-and-drop needed real `PointerEvent`s dispatched on the exact drag
+  target, not `document`/`window`:** `dnd-kit`'s `AbstractPointerSensor`
+  attaches its `move`/`end` listeners directly on `event.target` from the
+  originating `pointerdown` (confirmed by reading the installed
+  `@dnd-kit/core` source, `getEventListenerTarget`) — dispatching the
+  follow-up `pointermove`/`pointerup` on `document.dispatchEvent(...)`
+  looked plausible (bubble listeners usually don't care where you dispatch
+  from) but silently did nothing, since a document-dispatched event never
+  propagates *down* to a descendant's own directly-attached listener.
+  Dispatching every event in the sequence on the chip itself fixed
+  activation (confirmed live: `isDragging` true, correct
+  `translate3d(...)` tracking real-time pointer position) but the
+  pointer-based *drop* still didn't resolve a reorder in this session —
+  most likely a collision-detection rect-measurement timing issue specific
+  to a fully-synchronous synthetic sequence (dnd-kit's own multi-container
+  examples document real timing subtleties here, and `sovereign-plugin-kanban`'s
+  K.7 hit a related collision-detection bug), not chased further. The
+  **keyboard sensor** (already wired, `KeyboardSensor` +
+  `sortableKeyboardCoordinates`) exercises the identical `handleDragEnd` →
+  `reorderStopAction` code path and was verified end-to-end instead: focus
+  a chip, `Space` (lift) → `ArrowLeft` (move) → `Space` (drop) correctly
+  reordered two real stops, persisted through a full hard reload, and
+  correctly triggered the trip's denormalized date recompute (`_lib/stops.ts`'s
+  `recomputeTripDatesAndAutoLinks` runs on every stop mutation including
+  reorder) — the header's date range visibly updated to match the new
+  first/last-by-position stop, exactly the scenario `onReordered`'s
+  `router.refresh()` callback exists to catch. Pointer-drag *activation*
+  is independently confirmed working live; full pointer-drop-to-persist
+  was not, and that gap is recorded here rather than silently claimed.
+
+**Live-verified end to end:** the picker (empty and populated, "Open →"
+navigating into the workspace); the empty-stops workspace (screen 3's exact
+copy); the full add-stop flow (real OSM search results for "Belém," a real
+`existingPlaceId`-less candidate resolved through `createPlaceAction`, both
+dates required with `minDate` correctly disabling pre-arrival depart dates,
+submission, the new stop auto-selected and driving the T.16 placeholder's
+per-stop copy); the populated strip (two stops, solid connector between
+real stops, dashed connector to the trailing add chip, correct
+`day-count`/date-range per chip); keyboard drag-reorder (above). Fresh-tab
+console checked clean throughout (net of the stale-buffer entries
+explained above, confirmed via direct state checks). Two scratch-DB-seeded
+fixtures (a second trip's stop, used only to get two real stops on screen
+for the reorder test) were deleted afterward; the real "Belém" stop created
+through the actual `AddStopDialog` flow was left in place, matching the
+established "leave UI-created data, remove only scratch-seeded data"
+convention from `T.13`/`T.14`.
+
+Full check suite clean: `format:check`, `lint`, this package's `typecheck`,
+`design:tokens:check`, and all 286 travellog tests (279 existing + 7 new:
+4 for `listTripsForPicker`, 3 for `listWorkspaceStops`) pass; `@sovereignfs/ui`'s
+own typecheck and full 522-test suite (84 files) also pass, and
+`build-storybook` completes cleanly.
 
 **`T.14` — Trips screen: trip detail panel & sharing (`0.16.0`).** The
 click-to-detail column from `docs/adhoc/web-trips.md` screen 3 — status,

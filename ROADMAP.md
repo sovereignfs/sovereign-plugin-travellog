@@ -1,6 +1,6 @@
 # Sovereign Travellog — Roadmap
 
-**Manifest version:** 0.16.0 · **Last updated:** 2026-08-28
+**Manifest version:** 0.17.0 · **Last updated:** 2026-08-28
 
 Chronological build index — one row per PR, platform-`ROADMAP.md` style. Full
 task detail lives in [SPEC.md](SPEC.md); the product concept in
@@ -42,7 +42,7 @@ entry for the full account.
 | 0.14.0 | Auto-link engine                                    | ✅     | [T.12](SPEC.md#t12--auto-link-engine)                                            |
 | 0.15.0 | Trips screen (web): overview & cards                | ✅     | [T.13](SPEC.md#t13--trips-screen-web-overview--cards)                            |
 | 0.16.0 | Trips screen: trip detail panel & sharing           | ✅     | [T.14](SPEC.md#t14--trips-screen-trip-detail-panel--sharing)                     |
-| 0.17.0 | Planner: trip picker & stop workspace               | ⬜     | [T.15](SPEC.md#t15--planner-trip-picker--stop-workspace)                         |
+| 0.17.0 | Planner: trip picker & stop workspace               | ✅     | [T.15](SPEC.md#t15--planner-trip-picker--stop-workspace)                         |
 | 0.18.0 | Planner: day-by-day itinerary editor                | ⬜     | [T.16](SPEC.md#t16--planner-day-by-day-itinerary-editor)                         |
 | 0.19.0 | Slice 2 hardening & polish pass (web)               | ⬜     | [T.17](SPEC.md#t17--slice-2-hardening--polish-pass-web)                          |
 

@@ -154,10 +154,10 @@ Don't invent detail here ahead of its own pass — flag it and ask instead:
 
 ## Status
 
-Current manifest version: `0.16.0` (`T.1`–`T.14` shipped — Slice 1 web is
-feature-complete; Slice 2's data model, server layer, auto-link engine, and
-now the full Trips screen (overview stats, status-grouped/filterable cards,
-create-trip flow, and click-to-detail with an editable companions field)
-all exist. `T.15` (Planner: trip picker & stop workspace) is next). Task
-history and the reasoning behind every completed task lives in `SPEC.md`'s
-`Status` section — that's the changelog; don't duplicate it here.
+Current manifest version: `0.17.0` (`T.1`–`T.15` shipped — Slice 1 web is
+feature-complete; Slice 2's data model, server layer, auto-link engine,
+Trips screen, and now Planner's trip picker + stop workspace shell (add a
+stop, drag-reorder the strip) all exist. `T.16` (Planner: day-by-day
+itinerary editor) is next). Task history and the reasoning behind every
+completed task lives in `SPEC.md`'s `Status` section — that's the
+changelog; don't duplicate it here.

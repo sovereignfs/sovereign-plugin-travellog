@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../_db/schema';
 import { createTestDb, type TestDb } from '../../_db/__tests__/test-db';
+import { addDaysToDateKey, todayDateKey } from '../dates';
 import { createPlace } from '../places';
 import { createStop } from '../stops';
 import { createTrip, updateTrip } from '../trips';
@@ -11,6 +12,8 @@ import {
   getVisitDetail,
   getVisitTimelinePage,
   listTripCards,
+  listTripsForPicker,
+  listWorkspaceStops,
   VISIT_TIMELINE_PAGE_SIZE,
 } from '../queries';
 
@@ -387,5 +390,87 @@ describe('listTripCards (T.13, payload 2)', () => {
     const otherActor = { tenantId: 'tenant-1', userId: 'user-2' };
     await createTrip(t.travellog, otherActor, 'Not mine');
     expect(await listTripCards(t.travellog, actor)).toEqual([]);
+  });
+});
+
+describe('listTripsForPicker (T.15, payload 6)', () => {
+  it('returns an empty array when the caller has no trips', async () => {
+    expect(await listTripsForPicker(t.travellog, actor)).toEqual([]);
+  });
+
+  it('includes planning and upcoming trips, with a stop count', async () => {
+    const planning = await createTrip(t.travellog, actor, 'Someday trip');
+    const upcoming = await createTrip(t.travellog, actor, 'Berlin Design Week');
+    await createStop(t.travellog, upcoming.id, { placeId, arriveDate: '2999-01-01', departDate: '2999-01-03' });
+
+    const entries = await listTripsForPicker(t.travellog, actor);
+    expect(entries).toHaveLength(2);
+    expect(entries.find((e) => e.id === planning.id)).toMatchObject({
+      name: 'Someday trip',
+      status: 'planning',
+      stopCount: 0,
+    });
+    expect(entries.find((e) => e.id === upcoming.id)).toMatchObject({
+      name: 'Berlin Design Week',
+      status: 'upcoming',
+      startDate: '2999-01-01',
+      endDate: '2999-01-03',
+      stopCount: 1,
+    });
+  });
+
+  it('excludes ongoing and completed trips', async () => {
+    const ongoing = await createTrip(t.travellog, actor, 'Ongoing trip');
+    const todayKey = todayDateKey();
+    await createStop(t.travellog, ongoing.id, {
+      placeId,
+      arriveDate: addDaysToDateKey(todayKey, -1),
+      departDate: addDaysToDateKey(todayKey, 1),
+    });
+
+    const completed = await createTrip(t.travellog, actor, 'Completed trip');
+    await createStop(t.travellog, completed.id, { placeId, arriveDate: '2020-01-01', departDate: '2020-01-03' });
+
+    expect(await listTripsForPicker(t.travellog, actor)).toEqual([]);
+  });
+
+  it('scopes to the caller — another user’s trips never appear', async () => {
+    const otherActor = { tenantId: 'tenant-1', userId: 'user-2' };
+    await createTrip(t.travellog, otherActor, 'Not mine');
+    expect(await listTripsForPicker(t.travellog, actor)).toEqual([]);
+  });
+});
+
+describe('listWorkspaceStops (T.15, payload 7)', () => {
+  it('returns an empty array for a trip with no stops', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Someday trip');
+    expect(await listWorkspaceStops(t.travellog, actor, trip.id)).toEqual([]);
+  });
+
+  it('returns stops in position order, with place names', async () => {
+    const now = Date.now();
+    await t.db.insert(schema.places).values({
+      id: 'place-2',
+      tenantId: actor.tenantId,
+      name: 'Porto',
+      source: 'manual',
+      createdBy: actor.userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
+    await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    await createStop(t.travellog, trip.id, { placeId: 'place-2', arriveDate: '2026-06-12', departDate: '2026-06-14' });
+
+    const stops = await listWorkspaceStops(t.travellog, actor, trip.id);
+    expect(stops.map((s) => s.placeName)).toEqual(['Belém Tower', 'Porto']);
+    expect(stops[0]).toMatchObject({ arriveDate: '2026-06-10', departDate: '2026-06-12' });
+  });
+
+  it('another user’s trip never appears, even by a guessed tripId', async () => {
+    const otherActor = { tenantId: 'tenant-1', userId: 'user-2' };
+    const trip = await createTrip(t.travellog, otherActor, 'Not mine');
+    await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    expect(await listWorkspaceStops(t.travellog, actor, trip.id)).toEqual([]);
   });
 });

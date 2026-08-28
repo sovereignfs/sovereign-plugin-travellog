@@ -1,0 +1,34 @@
+.workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-6);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-1);
+}
+
+.backLink {
+  font-size: var(--sv-font-size-xs);
+  color: var(--sv-color-text-subtle);
+  text-decoration: none;
+}
+
+.backLink:hover {
+  text-decoration: underline;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--sv-font-size-2xl);
+  font-weight: 700;
+  color: var(--sv-color-text-primary);
+}
+
+.meta {
+  margin: 0;
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-muted);
+}

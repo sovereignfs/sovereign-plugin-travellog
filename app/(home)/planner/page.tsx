@@ -1,15 +1,22 @@
-import { EmptyState, PageContainer, PageHeader } from '@sovereignfs/ui';
+import { PageContainer } from '@sovereignfs/ui';
+import { PlannerPicker } from '../../_components/PlannerPicker';
+import { requireUser } from '../../_lib/authz';
+import { getDb } from '../../_lib/db';
+import { listTripsForPicker } from '../../_lib/queries';
 
-/** Placeholder — T.15 replaces this with the trip picker + stop workspace. */
-export default function PlannerPage() {
+/**
+ * `T.15`'s real Planner entry screen — `docs/adhoc/web-planner.md` screen
+ * 1. A Server Component fetching the picker payload directly, same pattern
+ * as Trips'/Check-ins' own `page.tsx`.
+ */
+export default async function PlannerPage() {
+  const actor = await requireUser();
+  const db = await getDb();
+  const trips = await listTripsForPicker(db, actor);
+
   return (
     <PageContainer maxWidth="lg">
-      <PageHeader title="Planner" />
-      <EmptyState
-        icon="route"
-        heading="Trip planning is coming soon"
-        description="Pick a trip to keep planning, or start a new one — once T.15 ships."
-      />
+      <PlannerPicker trips={trips} />
     </PageContainer>
   );
 }
