@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" font-family="-apple-system, 'Segoe UI', sans-serif">
+  <rect width="1200" height="500" fill="#fafafa"/>
+
+  <!-- Sidebar -->
+  <rect x="0" y="0" width="280" height="500" fill="#f4f4f5"/>
+  <line x1="280" y1="0" x2="280" y2="500" stroke="#e4e4e7"/>
+  <rect x="16" y="16" width="248" height="36" rx="8" fill="#18181b"/>
+  <text x="32" y="39" font-size="14" font-weight="600" fill="#ffffff">Trips</text>
+  <text x="32" y="79" font-size="14" fill="#52525b">Check-ins</text>
+  <text x="32" y="119" font-size="14" fill="#52525b">Planner</text>
+
+  <!-- Page header -->
+  <text x="300" y="52" font-size="24" font-weight="700" fill="#18181b">Trips</text>
+
+  <!-- Empty state -->
+  <rect x="450" y="160" width="300" height="220" rx="12" fill="none"/>
+  <circle cx="600" cy="220" r="34" fill="#f4f4f5"/>
+  <text x="600" y="230" font-size="26" text-anchor="middle" fill="#a1a1aa">✈</text>
+  <text x="600" y="288" font-size="17" font-weight="600" text-anchor="middle" fill="#18181b">No trips yet</text>
+  <text x="600" y="310" font-size="13" text-anchor="middle" fill="#71717a">Planning a trip? Start here — you can add</text>
+  <text x="600" y="328" font-size="13" text-anchor="middle" fill="#71717a">stops and dates as you go.</text>
+  <rect x="510" y="346" width="180" height="36" rx="8" fill="#18181b"/>
+  <text x="600" y="369" font-size="14" text-anchor="middle" fill="#ffffff">Plan your first trip</text>
+
+  <!-- Annotations -->
+  <text x="300" y="440" font-size="12" fill="#a1a1aa">Overview stat row and filter chips are not shown when there are zero trips.</text>
+  <text x="300" y="460" font-size="12" fill="#a1a1aa">Check-ins with no trip link are unaffected — this is trip history only, not the visit log.</text>
+</svg>

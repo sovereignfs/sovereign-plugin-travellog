@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600" font-family="-apple-system, 'Segoe UI', sans-serif">
+  <rect width="1000" height="600" fill="#fafafa"/>
+  <rect width="1000" height="600" fill="#18181b" opacity="0.35"/>
+
+  <!-- Dialog (Dialog size="md") -->
+  <rect x="320" y="150" width="360" height="240" rx="14" fill="#ffffff"/>
+  <text x="352" y="196" font-size="18" font-weight="700" fill="#18181b">New trip</text>
+  <text x="648" y="194" font-size="16" fill="#a1a1aa" text-anchor="end">×</text>
+
+  <text x="352" y="230" font-size="12" font-weight="600" fill="#52525b">Name</text>
+  <rect x="352" y="238" width="296" height="38" rx="8" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="364" y="262" font-size="13" fill="#a1a1aa">e.g. Kyoto &amp; Osaka</text>
+
+  <text x="352" y="304" font-size="12" fill="#71717a">You'll add stops, dates, and a day-by-day</text>
+  <text x="352" y="320" font-size="12" fill="#71717a">itinerary next, in Planner.</text>
+
+  <rect x="352" y="342" width="90" height="36" rx="8" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="374" y="365" font-size="13" fill="#52525b">Cancel</text>
+  <rect x="452" y="342" width="196" height="36" rx="8" fill="#18181b"/>
+  <text x="470" y="365" font-size="13" fill="#ffffff">Create &amp; open in Planner</text>
+
+  <!-- Annotations -->
+  <text x="320" y="430" font-size="12" fill="#a1a1aa">Same modal, reachable from both the Trips "New trip" CTA and</text>
+  <text x="320" y="448" font-size="12" fill="#a1a1aa">Planner's own "New trip" CTA — one create-trip action, two entry points.</text>
+  <text x="320" y="470" font-size="12" fill="#a1a1aa">No date range field here — a trip's dates are derived from its stops, set in Planner.</text>
+  <text x="320" y="492" font-size="12" fill="#a1a1aa">Expected failures (e.g. empty name) render inline via useActionState; button label flips to "Creating…" while pending.</text>
+</svg>

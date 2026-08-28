@@ -1,0 +1,102 @@
+/* Matches PageHeader's own gutter above it (PageContainer's default `md`
+   padding) so a row's left edge lines up with the page title, per the
+   wireframe — the list is inset, not edge-to-edge. */
+.list {
+  padding: var(--sv-space-2) var(--sv-space-8) var(--sv-space-8);
+}
+
+@media (max-width: 768px) {
+  .list {
+    padding: var(--sv-space-2) var(--sv-space-4) var(--sv-space-4);
+  }
+}
+
+.dayHeader {
+  padding: var(--sv-space-4) 0 var(--sv-space-2);
+  font-size: var(--sv-font-size-xs);
+  font-weight: 600;
+  color: var(--sv-color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.row {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-3);
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: var(--sv-space-2);
+  padding: var(--sv-space-3) var(--sv-space-4);
+  cursor: pointer;
+  border: var(--sv-border-width-hairline) solid var(--sv-color-border);
+  border-radius: var(--sv-radius-md);
+  background: var(--sv-color-surface-raised);
+}
+
+.row:hover {
+  background: var(--sv-color-surface-sunken);
+}
+
+.rowActive {
+  border-color: var(--sv-color-text-primary);
+}
+
+.rowGlyph {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--sv-radius-md);
+  background: var(--sv-color-surface-sunken);
+  color: var(--sv-color-text-muted);
+}
+
+.rowMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.rowName {
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  font-size: var(--sv-font-size-xs);
+  color: var(--sv-color-text-muted);
+}
+
+.tripBadge {
+  flex-shrink: 0;
+  padding: 2px var(--sv-space-2);
+  border-radius: var(--sv-radius-full);
+  background: var(--sv-color-surface-sunken);
+  font-size: var(--sv-font-size-xs);
+  color: var(--sv-color-text-muted);
+}
+
+.loadMore {
+  display: block;
+  width: 100%;
+  margin-top: var(--sv-space-2);
+}
+
+.emptyActions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sv-space-2);
+}
+
+.emptyHint {
+  font-size: var(--sv-font-size-xs);
+  color: var(--sv-color-text-muted);
+}

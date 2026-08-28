@@ -1,0 +1,52 @@
+/* Content/padding only — width, background, and border-right come from
+   ThreeColumnLayout's own `.sidebar` wrapper (packages/ui). Direct copy of
+   `sovereign-plugin-docs`'s `DocsSidebar.module.css`, minus the `.group*`
+   classes — Travellog's sidebar has no per-item quick-access lists. */
+.nav {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: var(--sv-space-1);
+  padding: var(--sv-space-4) var(--sv-space-3);
+}
+
+.link {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-2);
+  padding: var(--sv-space-2) var(--sv-space-3);
+  border-radius: var(--sv-radius-md);
+  font-size: var(--sv-font-size-sm);
+  font-weight: 500;
+  color: var(--sv-color-text-muted);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link:hover {
+  background: var(--sv-color-surface-sunken);
+  color: var(--sv-color-text-primary);
+}
+
+.linkActive {
+  background: var(--sv-color-surface-sunken);
+  color: var(--sv-color-text-primary);
+  font-weight: 600;
+}
+
+.divider {
+  margin: var(--sv-space-2) var(--sv-space-4);
+  border-top: 1px solid var(--sv-color-border);
+}
+
+/* Pins Settings to the bottom of the sidebar — a configure-once screen,
+   kept visually distinct from Trips/Check-ins/Planner above it. */
+.bottomSection {
+  margin-top: auto;
+}
+
+.bottomSection .divider {
+  margin: var(--sv-space-2) var(--sv-space-4) var(--sv-space-2);
+}

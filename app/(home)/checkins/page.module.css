@@ -1,0 +1,23 @@
+/*
+ * A page root that owns the scroll split itself, rather than letting
+ * ThreeColumnLayout's `.main` slot (`overflow-y: auto`) scroll the header
+ * along with the timeline: `.header` stays a fixed, non-shrinking sibling
+ * above `.body`, which hands its own scrolling off to `CheckinsTimeline`'s
+ * `MainDetailSplit` (each of `.list`/`.detail` scrolls independently).
+ * Same technique already used for Drawer/Sheet's panel/body split.
+ */
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.header {
+  flex-shrink: 0;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+}

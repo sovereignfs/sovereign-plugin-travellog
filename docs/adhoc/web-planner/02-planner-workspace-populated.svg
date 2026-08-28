@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" font-family="-apple-system, 'Segoe UI', sans-serif">
+  <rect width="1200" height="720" fill="#fafafa"/>
+
+  <!-- Sidebar -->
+  <rect x="0" y="0" width="280" height="720" fill="#f4f4f5"/>
+  <line x1="280" y1="0" x2="280" y2="720" stroke="#e4e4e7"/>
+  <text x="32" y="39" font-size="14" fill="#52525b">Trips</text>
+  <text x="32" y="79" font-size="14" fill="#52525b">Check-ins</text>
+  <rect x="16" y="96" width="248" height="36" rx="8" fill="#18181b"/>
+  <text x="32" y="119" font-size="14" font-weight="600" fill="#ffffff">Planner</text>
+
+  <!-- Trip header -->
+  <text x="300" y="42" font-size="12" fill="#a1a1aa">← Planner</text>
+  <text x="300" y="76" font-size="24" font-weight="700" fill="#18181b">Lisbon Weekend</text>
+  <text x="300" y="98" font-size="13" fill="#71717a">2 stops · Aug 26 – 30, 2026</text>
+  <rect x="1092" y="52" width="108" height="34" rx="8" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="1112" y="74" font-size="13" fill="#18181b">Share</text>
+
+  <!-- Stop timeline strip -->
+  <line x1="490" y1="156" x2="506" y2="156" stroke="#d4d4d8" stroke-width="2"/>
+  <line x1="696" y1="156" x2="712" y2="156" stroke="#d4d4d8" stroke-width="2" stroke-dasharray="4 3"/>
+
+  <g>
+    <rect x="300" y="124" width="190" height="64" rx="10" fill="#18181b"/>
+    <text x="316" y="150" font-size="15" font-weight="600" fill="#ffffff">Lisbon</text>
+    <text x="316" y="170" font-size="12" fill="#d4d4d8">Aug 26 – 28 · 2 days</text>
+  </g>
+  <g>
+    <rect x="506" y="124" width="190" height="64" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <text x="522" y="150" font-size="15" font-weight="600" fill="#18181b">Porto</text>
+    <text x="522" y="170" font-size="12" fill="#71717a">Aug 28 – 30 · 2 days</text>
+  </g>
+  <g>
+    <rect x="712" y="124" width="170" height="64" rx="10" fill="none" stroke="#d4d4d8" stroke-dasharray="6 4"/>
+    <text x="797" y="162" font-size="13" text-anchor="middle" fill="#52525b">+ Add a stop</text>
+  </g>
+
+  <!-- Day-by-day itinerary for selected stop (Lisbon) -->
+  <text x="300" y="224" font-size="15" font-weight="700" fill="#18181b">Day 1 · Tue, Aug 26</text>
+
+  <g>
+    <rect x="300" y="236" width="880" height="52" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <text x="316" y="268" font-size="13" font-weight="600" fill="#18181b">09:00</text>
+    <text x="380" y="262" font-size="14" font-weight="600" fill="#18181b">Belém Tower</text>
+    <text x="380" y="278" font-size="12" fill="#71717a">Landmark</text>
+  </g>
+  <g>
+    <rect x="300" y="296" width="880" height="52" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <text x="316" y="328" font-size="13" font-weight="600" fill="#18181b">13:00</text>
+    <text x="380" y="322" font-size="14" font-weight="600" fill="#18181b">Time Out Market</text>
+    <text x="380" y="338" font-size="12" fill="#71717a">Food hall · reservation</text>
+    <rect x="1108" y="310" width="56" height="22" rx="11" fill="#18181b"/>
+    <text x="1121" y="325" font-size="11" fill="#ffffff">Fixed</text>
+  </g>
+  <text x="300" y="374" font-size="13" font-weight="600" fill="#18181b">+ Add activity</text>
+
+  <text x="300" y="416" font-size="15" font-weight="700" fill="#18181b">Day 2 · Wed, Aug 27</text>
+  <g>
+    <rect x="300" y="428" width="880" height="52" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <text x="316" y="460" font-size="13" font-weight="600" fill="#18181b">10:30</text>
+    <text x="380" y="454" font-size="14" font-weight="600" fill="#18181b">Oceanário de Lisboa</text>
+    <text x="380" y="470" font-size="12" fill="#71717a">Aquarium</text>
+  </g>
+  <text x="300" y="506" font-size="13" font-weight="600" fill="#18181b">+ Add activity</text>
+
+  <!-- Annotations -->
+  <text x="300" y="574" font-size="12" fill="#a1a1aa">Clicking "Porto" in the strip swaps this whole day list to Porto's days — local state, no navigation.</text>
+  <text x="300" y="592" font-size="12" fill="#a1a1aa">"Fixed" badge only appears on timed items explicitly marked as a real commitment (see 04-add-stop-dialog.svg's</text>
+  <text x="300" y="610" font-size="12" fill="#a1a1aa">sibling, the add/edit-item flow) — untimed and flexible items show no badge at all, not a "Flexible" label.</text>
+  <text x="300" y="638" font-size="12" fill="#a1a1aa">Clicking an item row opens the detail column for that item — see 05-itinerary-item-detail-panel.svg.</text>
+  <text x="300" y="656" font-size="12" fill="#a1a1aa">Stop chips are drag-reorderable (dnd-kit, distance-activated, same pattern as Kanban's card drag).</text>
+</svg>

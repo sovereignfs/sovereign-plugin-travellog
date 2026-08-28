@@ -1,0 +1,8 @@
+/* Gives ThreeColumnLayout's `height: 100%` a resolvable ancestor — the
+   root shell's own `.body` (travellog.module.css) is a flex item with a
+   definite computed height (`flex: 1 1 auto` inside `.shell`'s
+   `height: 100dvh`), so this simple `height: 100%` is enough to bridge it
+   down. Matches `sovereign-plugin-docs`'s `(home)/layout.module.css`. */
+.homeFrame {
+  height: 100%;
+}

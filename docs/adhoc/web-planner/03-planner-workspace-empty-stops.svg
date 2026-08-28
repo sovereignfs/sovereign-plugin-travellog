@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" font-family="-apple-system, 'Segoe UI', sans-serif">
+  <rect width="1200" height="420" fill="#fafafa"/>
+
+  <!-- Sidebar -->
+  <rect x="0" y="0" width="280" height="420" fill="#f4f4f5"/>
+  <line x1="280" y1="0" x2="280" y2="420" stroke="#e4e4e7"/>
+  <text x="32" y="39" font-size="14" fill="#52525b">Trips</text>
+  <text x="32" y="79" font-size="14" fill="#52525b">Check-ins</text>
+  <rect x="16" y="96" width="248" height="36" rx="8" fill="#18181b"/>
+  <text x="32" y="119" font-size="14" font-weight="600" fill="#ffffff">Planner</text>
+
+  <!-- Trip header -->
+  <text x="300" y="42" font-size="12" fill="#a1a1aa">← Planner</text>
+  <text x="300" y="76" font-size="24" font-weight="700" fill="#18181b">Kyoto &amp; Osaka</text>
+  <text x="300" y="98" font-size="13" fill="#71717a">No stops yet · dates not set</text>
+
+  <!-- Empty stop-strip prompt -->
+  <rect x="300" y="130" width="880" height="150" rx="12" fill="none" stroke="#d4d4d8" stroke-dasharray="6 4"/>
+  <text x="740" y="172" font-size="15" font-weight="600" text-anchor="middle" fill="#18181b">Add your first stop</text>
+  <text x="740" y="194" font-size="13" text-anchor="middle" fill="#71717a">A place, plus when you'll arrive and leave. This trip's</text>
+  <text x="740" y="212" font-size="13" text-anchor="middle" fill="#71717a">overall dates are set from your stops, not the other way around.</text>
+  <rect x="656" y="230" width="168" height="34" rx="8" fill="#18181b"/>
+  <text x="740" y="252" font-size="13" text-anchor="middle" fill="#ffffff">+ Add a stop</text>
+
+  <!-- Annotations -->
+  <text x="300" y="300" font-size="12" fill="#a1a1aa">No day-by-day section renders at all until a stop exists — there are no days to show without a date range.</text>
+  <text x="300" y="318" font-size="12" fill="#a1a1aa">This trip's status stays "Planning" (Trips screen) for as long as it has zero stops.</text>
+  <text x="300" y="346" font-size="12" fill="#a1a1aa">Clicking the prompt opens 04-add-stop-dialog.svg — same dialog used for every subsequent "+ Add a stop".</text>
+</svg>

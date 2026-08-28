@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="600" viewBox="0 0 1000 600" font-family="-apple-system, 'Segoe UI', sans-serif">
+  <rect width="1000" height="600" fill="#fafafa"/>
+  <rect width="1000" height="600" fill="#18181b" opacity="0.35"/>
+
+  <!-- Dialog (Dialog size="md") -->
+  <rect x="290" y="90" width="420" height="440" rx="14" fill="#ffffff"/>
+  <text x="322" y="136" font-size="18" font-weight="700" fill="#18181b">Add a stop</text>
+  <text x="678" y="134" font-size="16" fill="#a1a1aa" text-anchor="end">×</text>
+
+  <text x="322" y="170" font-size="12" font-weight="600" fill="#52525b">Place</text>
+  <rect x="322" y="178" width="356" height="38" rx="8" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="334" y="202" font-size="13" fill="#18181b">Porto</text>
+
+  <rect x="322" y="222" width="356" height="44" rx="8" fill="#f4f4f5"/>
+  <text x="334" y="240" font-size="13" fill="#18181b">Porto, Portugal</text>
+  <text x="334" y="256" font-size="11" fill="#71717a">City</text>
+  <rect x="322" y="270" width="356" height="44" rx="8" fill="#ffffff" stroke="#e4e4e7"/>
+  <text x="334" y="288" font-size="13" fill="#18181b">＋ Create "Porto" as a new place</text>
+  <text x="334" y="304" font-size="11" fill="#a1a1aa">No coordinates — you can pin it on a map later</text>
+
+  <line x1="322" y1="332" x2="678" y2="332" stroke="#f4f4f5"/>
+
+  <text x="322" y="358" font-size="12" font-weight="600" fill="#52525b">Arrive</text>
+  <rect x="322" y="366" width="166" height="38" rx="8" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="334" y="390" font-size="13" fill="#18181b">Aug 28, 2026</text>
+
+  <text x="512" y="358" font-size="12" font-weight="600" fill="#52525b">Depart</text>
+  <rect x="512" y="366" width="166" height="38" rx="8" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="524" y="390" font-size="13" fill="#18181b">Aug 30, 2026</text>
+
+  <text x="322" y="428" font-size="11" fill="#a1a1aa">Leave dates blank for now if you're not sure yet —</text>
+  <text x="322" y="444" font-size="11" fill="#a1a1aa">you can add or adjust them anytime before the trip starts.</text>
+
+  <rect x="322" y="472" width="90" height="36" rx="8" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="344" y="495" font-size="13" fill="#52525b">Cancel</text>
+  <rect x="422" y="472" width="130" height="36" rx="8" fill="#18181b"/>
+  <text x="440" y="495" font-size="13" fill="#ffffff">Add stop</text>
+
+  <!-- Annotations -->
+  <text x="290" y="558" font-size="12" fill="#a1a1aa">Place field reuses the check-in place-search flow (search-first, manual create-new fallback) —</text>
+  <text x="290" y="576" font-size="12" fill="#a1a1aa">not a separate implementation. Adding/editing a stop's dates is what recomputes the trip's overall date range and its day list.</text>
+</svg>

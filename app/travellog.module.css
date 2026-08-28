@@ -1,0 +1,92 @@
+/* --- Root shell (every page) ------------------------------------------ */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  /* `100dvh`, not `100%` — the `(minimal)` route group's own wrapper sets
+     `min-height: 100dvh` on itself but never a definite `height`, so a
+     percentage height here can't resolve against it. A hard `height`, not
+     `min-height`, caps this at the viewport so `.body`'s own
+     `flex: 1 1 auto; min-height: 0; overflow-y: auto` absorbs any excess
+     content instead of the excess pushing `.shell` (and the header with it)
+     off-screen. Matches `sovereign-plugin-docs`'s `docs.module.css`. */
+  height: 100dvh;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* --- Top header (web only; every page) --------------------------------- */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* A compact top bar (matches Kanban's/Docs' own), not the platform's own
+     60px shell header — this plugin owns its whole viewport under
+     `shell: minimal`, so it isn't bound to platform chrome dimensions. */
+  min-height: 48px;
+  padding: var(--sv-space-2) var(--sv-space-4);
+  border-bottom: 1px solid var(--sv-color-border);
+  background-color: var(--sv-color-surface);
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-2);
+}
+
+/* Instance-initial brand badge — same treatment as the platform's own
+   `.brand` (runtime/app/(platform)/shell.module.css): accent-filled tile,
+   the instance name's first letter, no image asset involved. Links to
+   `/launcher`, same as the platform's own. */
+.headerBrandBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--sv-radius-md);
+  background-color: var(--sv-color-accent);
+  color: var(--sv-color-text-on-accent);
+  font-size: var(--sv-font-size-xs);
+  font-weight: var(--sv-font-weight-semibold);
+  text-decoration: none;
+}
+
+.headerBrand {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-2);
+  text-decoration: none;
+  color: var(--sv-color-text-primary);
+}
+
+.headerBrandIcon {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+:global([data-theme='dark']) .headerBrandIcon {
+  filter: invert(1);
+}
+
+.headerBrandName {
+  font-size: var(--sv-font-size-md);
+  font-weight: 600;
+}
+
+/* --- Error boundary (app/error.tsx) ------------------------------------ */
+
+.centered {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sv-space-4);
+  padding-top: var(--sv-space-8);
+}

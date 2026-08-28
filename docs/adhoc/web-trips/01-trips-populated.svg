@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" font-family="-apple-system, 'Segoe UI', sans-serif">
+  <rect width="1200" height="760" fill="#fafafa"/>
+
+  <!-- Sidebar -->
+  <rect x="0" y="0" width="280" height="760" fill="#f4f4f5"/>
+  <line x1="280" y1="0" x2="280" y2="760" stroke="#e4e4e7"/>
+  <rect x="16" y="16" width="248" height="36" rx="8" fill="#18181b"/>
+  <text x="32" y="39" font-size="14" font-weight="600" fill="#ffffff">Trips</text>
+  <text x="32" y="79" font-size="14" fill="#52525b">Check-ins</text>
+  <text x="32" y="119" font-size="14" fill="#52525b">Planner</text>
+  <line x1="16" y1="146" x2="264" y2="146" stroke="#e4e4e7"/>
+  <text x="32" y="700" font-size="14" fill="#52525b">Settings</text>
+  <text x="32" y="732" font-size="13" fill="#a1a1aa">← Launcher</text>
+
+  <!-- Page header -->
+  <text x="300" y="52" font-size="24" font-weight="700" fill="#18181b">Trips</text>
+  <rect x="1092" y="28" width="108" height="36" rx="8" fill="#18181b"/>
+  <text x="1112" y="51" font-size="14" fill="#ffffff">New trip</text>
+
+  <!-- Overview stat tiles -->
+  <g>
+    <rect x="300" y="76" width="155" height="56" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <text x="316" y="102" font-size="20" font-weight="700" fill="#18181b">12</text>
+    <text x="316" y="120" font-size="11" fill="#71717a">trips</text>
+  </g>
+  <g>
+    <rect x="471" y="76" width="155" height="56" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <text x="487" y="102" font-size="20" font-weight="700" fill="#18181b">34</text>
+    <text x="487" y="120" font-size="11" fill="#71717a">places visited</text>
+  </g>
+  <g>
+    <rect x="642" y="76" width="155" height="56" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <text x="658" y="102" font-size="20" font-weight="700" fill="#18181b">9</text>
+    <text x="658" y="120" font-size="11" fill="#71717a">countries visited</text>
+  </g>
+  <g>
+    <rect x="813" y="76" width="155" height="56" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <text x="829" y="102" font-size="20" font-weight="700" fill="#18181b">156</text>
+    <text x="829" y="120" font-size="11" fill="#71717a">check-ins</text>
+  </g>
+  <g>
+    <rect x="984" y="76" width="155" height="56" rx="10" fill="#f4f4f5" stroke="#e4e4e7"/>
+    <text x="1000" y="100" font-size="13" font-weight="700" fill="#18181b">Next trip</text>
+    <text x="1000" y="120" font-size="11" fill="#71717a">Lisbon in 3 days</text>
+  </g>
+
+  <!-- Filter row -->
+  <rect x="300" y="152" width="52" height="30" rx="15" fill="#18181b"/>
+  <text x="313" y="171" font-size="12" fill="#ffffff">All</text>
+  <rect x="360" y="152" width="86" height="30" rx="15" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="374" y="171" font-size="12" fill="#52525b">Planning</text>
+  <rect x="454" y="152" width="90" height="30" rx="15" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="468" y="171" font-size="12" fill="#52525b">Upcoming</text>
+  <rect x="552" y="152" width="82" height="30" rx="15" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="566" y="171" font-size="12" fill="#52525b">Ongoing</text>
+  <rect x="642" y="152" width="92" height="30" rx="15" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="656" y="171" font-size="12" fill="#52525b">Completed</text>
+  <rect x="950" y="152" width="250" height="30" rx="8" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="964" y="171" font-size="12" fill="#a1a1aa">Search trips…</text>
+
+  <!-- Planning group -->
+  <text x="300" y="216" font-size="14" font-weight="600" fill="#18181b">Planning</text>
+  <text x="360" y="216" font-size="12" fill="#a1a1aa">1</text>
+  <g>
+    <rect x="300" y="230" width="430" height="120" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <rect x="316" y="246" width="72" height="22" rx="11" fill="#f4f4f5"/>
+    <text x="328" y="261" font-size="11" fill="#52525b">Planning</text>
+    <text x="316" y="292" font-size="16" font-weight="600" fill="#18181b">Kyoto &amp; Osaka</text>
+    <text x="316" y="312" font-size="12" fill="#71717a">Dates not set yet · 3 stops planned</text>
+    <text x="316" y="336" font-size="13" font-weight="600" fill="#18181b">Continue planning →</text>
+  </g>
+
+  <!-- Upcoming group -->
+  <text x="300" y="382" font-size="14" font-weight="600" fill="#18181b">Upcoming</text>
+  <text x="374" y="382" font-size="12" fill="#a1a1aa">1</text>
+  <g>
+    <rect x="300" y="396" width="430" height="120" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <rect x="316" y="412" width="76" height="22" rx="11" fill="#f4f4f5"/>
+    <text x="328" y="427" font-size="11" fill="#52525b">Upcoming</text>
+    <circle cx="700" cy="423" r="11" fill="#d4d4d8"/>
+    <circle cx="686" cy="423" r="11" fill="#e4e4e7"/>
+    <text x="316" y="458" font-size="16" font-weight="600" fill="#18181b">Berlin Design Week</text>
+    <text x="316" y="478" font-size="12" fill="#71717a">Sep 14–18 · 5 days · 1 stop</text>
+    <text x="316" y="502" font-size="13" font-weight="600" fill="#18181b">View itinerary →</text>
+  </g>
+
+  <!-- Ongoing group (primary state) -->
+  <text x="300" y="548" font-size="14" font-weight="600" fill="#18181b">Ongoing</text>
+  <text x="366" y="548" font-size="12" fill="#a1a1aa">1</text>
+  <g>
+    <rect x="300" y="562" width="430" height="120" rx="10" fill="#ffffff" stroke="#18181b" stroke-width="1.5"/>
+    <rect x="316" y="578" width="66" height="22" rx="11" fill="#18181b"/>
+    <text x="328" y="593" font-size="11" fill="#ffffff">Ongoing</text>
+    <text x="316" y="620" font-size="16" font-weight="600" fill="#18181b">Lisbon Weekend</text>
+    <text x="316" y="638" font-size="12" fill="#71717a">Aug 26–30 · day 3 of 5 · 2 stops</text>
+    <rect x="316" y="648" width="150" height="28" rx="8" fill="#18181b"/>
+    <text x="332" y="667" font-size="13" fill="#ffffff">Open Trip Mode →</text>
+  </g>
+
+  <!-- Continues below -->
+  <text x="300" y="722" font-size="12" fill="#a1a1aa">Completed · 2 trips — continues below the fold, same card shape, CTA "View trip".</text>
+
+  <!-- Annotations -->
+  <text x="750" y="230" font-size="12" fill="#a1a1aa" text-anchor="start"></text>
+  <text x="300" y="742" font-size="12" fill="#a1a1aa">Clicking a card (not its CTA) opens the detail column — see 03-trip-detail-panel.svg.</text>
+</svg>

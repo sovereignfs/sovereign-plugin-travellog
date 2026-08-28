@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" font-family="-apple-system, 'Segoe UI', sans-serif">
+  <rect width="1200" height="480" fill="#fafafa"/>
+
+  <!-- Sidebar -->
+  <rect x="0" y="0" width="280" height="480" fill="#f4f4f5"/>
+  <line x1="280" y1="0" x2="280" y2="480" stroke="#e4e4e7"/>
+  <text x="32" y="39" font-size="14" fill="#52525b">Trips</text>
+  <text x="32" y="79" font-size="14" fill="#52525b">Check-ins</text>
+  <rect x="16" y="96" width="248" height="36" rx="8" fill="#18181b"/>
+  <text x="32" y="119" font-size="14" font-weight="600" fill="#ffffff">Planner</text>
+
+  <!-- Page header -->
+  <text x="300" y="52" font-size="24" font-weight="700" fill="#18181b">Planner</text>
+  <text x="300" y="76" font-size="13" fill="#71717a">Pick a trip to keep planning, or start a new one.</text>
+  <rect x="1092" y="28" width="108" height="36" rx="8" fill="#18181b"/>
+  <text x="1112" y="51" font-size="14" fill="#ffffff">New trip</text>
+
+  <!-- Picker list -->
+  <g>
+    <rect x="300" y="112" width="880" height="76" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <rect x="320" y="132" width="72" height="22" rx="11" fill="#f4f4f5"/>
+    <text x="332" y="147" font-size="11" fill="#52525b">Planning</text>
+    <text x="410" y="150" font-size="16" font-weight="600" fill="#18181b">Kyoto &amp; Osaka</text>
+    <text x="410" y="170" font-size="12" fill="#71717a">3 stops planned · dates not set yet</text>
+    <text x="1140" y="156" font-size="13" font-weight="600" fill="#18181b">Open →</text>
+  </g>
+  <g>
+    <rect x="300" y="200" width="880" height="76" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <rect x="320" y="220" width="76" height="22" rx="11" fill="#f4f4f5"/>
+    <text x="332" y="235" font-size="11" fill="#52525b">Upcoming</text>
+    <text x="414" y="238" font-size="16" font-weight="600" fill="#18181b">Berlin Design Week</text>
+    <text x="414" y="258" font-size="12" fill="#71717a">1 stop · Sep 14–18</text>
+    <text x="1140" y="244" font-size="13" font-weight="600" fill="#18181b">Open →</text>
+  </g>
+
+  <!-- Annotations -->
+  <text x="300" y="322" font-size="12" fill="#a1a1aa">Only Planning and Upcoming trips list here — an already-completed trip's itinerary is</text>
+  <text x="300" y="340" font-size="12" fill="#a1a1aa">edited from Trips instead (open it there, "Open in Planner" still works for it if needed).</text>
+  <text x="300" y="368" font-size="12" fill="#a1a1aa">"New trip" opens the same create-trip modal as the Trips screen (web-trips/04-create-trip-dialog.svg)</text>
+  <text x="300" y="386" font-size="12" fill="#a1a1aa">and lands directly in the workspace for the new trip — see 03-planner-workspace-empty-stops.svg.</text>
+  <text x="300" y="414" font-size="12" fill="#a1a1aa">Selecting a trip swaps the main column's content in place — this is not a detail-column interaction</text>
+  <text x="300" y="432" font-size="12" fill="#a1a1aa">like Trips/Check-ins; Planner has no third column of its own except for a single itinerary item (screen 5).</text>
+</svg>

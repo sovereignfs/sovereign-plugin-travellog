@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600" font-family="-apple-system, 'Segoe UI', sans-serif">
+  <rect width="1200" height="600" fill="#fafafa"/>
+
+  <!-- Sidebar -->
+  <rect x="0" y="0" width="280" height="600" fill="#f4f4f5"/>
+  <line x1="280" y1="0" x2="280" y2="600" stroke="#e4e4e7"/>
+  <text x="32" y="39" font-size="14" fill="#52525b">Trips</text>
+  <rect x="16" y="56" width="248" height="36" rx="8" fill="#18181b"/>
+  <text x="32" y="79" font-size="14" font-weight="600" fill="#ffffff">Check-ins</text>
+  <text x="32" y="119" font-size="14" fill="#52525b">Planner</text>
+
+  <!-- Page header -->
+  <text x="300" y="52" font-size="24" font-weight="700" fill="#18181b">Check-ins</text>
+  <rect x="1076" y="28" width="124" height="36" rx="8" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="1096" y="51" font-size="14" fill="#18181b">Import…</text>
+
+  <!-- Today -->
+  <text x="300" y="106" font-size="13" font-weight="600" fill="#71717a">TODAY</text>
+  <g>
+    <rect x="300" y="116" width="880" height="56" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <rect x="312" y="128" width="32" height="32" rx="8" fill="#f4f4f5"/>
+    <text x="360" y="140" font-size="14" font-weight="600" fill="#18181b">Time Out Market</text>
+    <text x="360" y="158" font-size="12" fill="#71717a">Food hall · 12:40 PM</text>
+    <rect x="1080" y="132" width="80" height="22" rx="11" fill="#f4f4f5"/>
+    <text x="1092" y="147" font-size="11" fill="#52525b">Lisbon Weekend</text>
+  </g>
+
+  <!-- Yesterday -->
+  <text x="300" y="204" font-size="13" font-weight="600" fill="#71717a">YESTERDAY</text>
+  <g>
+    <rect x="300" y="214" width="880" height="56" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <rect x="312" y="226" width="32" height="32" rx="8" fill="#e4e4e7"/>
+    <text x="360" y="238" font-size="14" font-weight="600" fill="#18181b">Belém Tower</text>
+    <text x="360" y="256" font-size="12" fill="#71717a">Landmark · 3:15 PM · with Tom Kelly</text>
+    <rect x="1080" y="230" width="80" height="22" rx="11" fill="#f4f4f5"/>
+    <text x="1092" y="245" font-size="11" fill="#52525b">Lisbon Weekend</text>
+  </g>
+  <g>
+    <rect x="300" y="278" width="880" height="56" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <rect x="312" y="290" width="32" height="32" rx="8" fill="#f4f4f5"/>
+    <text x="360" y="302" font-size="14" font-weight="600" fill="#18181b">Pastéis de Belém</text>
+    <text x="360" y="320" font-size="12" fill="#71717a">Bakery · 3:50 PM</text>
+    <rect x="1080" y="294" width="80" height="22" rx="11" fill="#f4f4f5"/>
+    <text x="1092" y="309" font-size="11" fill="#52525b">Lisbon Weekend</text>
+  </g>
+
+  <!-- Aug 3 (no trip) -->
+  <text x="300" y="368" font-size="13" font-weight="600" fill="#71717a">AUG 3</text>
+  <g>
+    <rect x="300" y="378" width="880" height="56" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+    <rect x="312" y="390" width="32" height="32" rx="8" fill="#f4f4f5"/>
+    <text x="360" y="402" font-size="14" font-weight="600" fill="#18181b">Corvo Coffee Roasters</text>
+    <text x="360" y="420" font-size="12" fill="#71717a">Café · 9:10 AM</text>
+  </g>
+
+  <!-- Annotations -->
+  <text x="300" y="470" font-size="12" fill="#a1a1aa">No trip badge on the last row — this check-in has no trip link (an ordinary local café visit,</text>
+  <text x="300" y="488" font-size="12" fill="#a1a1aa">not part of any trip's dates). Every check-in shows in this one timeline regardless of trip link —</text>
+  <text x="300" y="506" font-size="12" fill="#a1a1aa">open question: default-scope to unlinked only instead? Leaning "everything, badge inline" (shown here).</text>
+  <text x="300" y="536" font-size="12" fill="#a1a1aa">Clicking a row opens the detail column — see 03-checkin-detail-panel.svg. "Import…" opens 04-import-swarm.svg.</text>
+  <text x="300" y="554" font-size="12" fill="#a1a1aa">No "Check in" button here — web is view-only, capture is mobile-only (SPEC.md T.7).</text>
+</svg>

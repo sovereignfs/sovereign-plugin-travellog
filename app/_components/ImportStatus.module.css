@@ -1,0 +1,63 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-4);
+  margin-top: var(--sv-space-4);
+}
+
+.uploadError {
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-error-text);
+}
+
+.progressHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sv-space-2);
+}
+
+.progressTitle {
+  font-size: var(--sv-font-size-md);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+}
+
+.badges {
+  display: flex;
+  gap: var(--sv-space-2);
+}
+
+.progressCounts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-1);
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-primary);
+}
+
+.photoCounts {
+  color: var(--sv-color-text-muted);
+}
+
+.backgroundNote {
+  font-size: var(--sv-font-size-xs);
+  color: var(--sv-color-text-muted);
+}
+
+.summaryCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sv-space-3);
+}
+
+.summaryText {
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-primary);
+}
+
+.errorText {
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-error-text);
+}

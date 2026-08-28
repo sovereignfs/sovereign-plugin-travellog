@@ -1,0 +1,103 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sv-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-4);
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sv-space-8) 0;
+}
+
+.missing {
+  color: var(--sv-color-text-muted);
+  font-size: var(--sv-font-size-sm);
+}
+
+.photoStrip {
+  display: flex;
+  gap: var(--sv-space-2);
+  overflow-x: auto;
+}
+
+.photo {
+  flex-shrink: 0;
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: var(--sv-radius-md);
+  background: var(--sv-color-surface-sunken);
+}
+
+.metaRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-2);
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-subtle);
+}
+
+.tripRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-2);
+}
+
+.unlinkButton {
+  all: unset;
+  cursor: pointer;
+  font-size: var(--sv-font-size-xs);
+  color: var(--sv-color-text-muted);
+  text-decoration: underline;
+}
+
+.unlinkButton:hover:not(:disabled) {
+  color: var(--sv-color-text-primary);
+}
+
+.unlinkButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-1);
+}
+
+.sectionLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-2);
+  font-size: var(--sv-font-size-xs);
+  font-weight: 600;
+  color: var(--sv-color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.note {
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-primary);
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.companions {
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-primary);
+  margin: 0;
+}

@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# Database files (SQLite dev data)
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store

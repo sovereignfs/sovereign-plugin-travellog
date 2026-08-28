@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" font-family="-apple-system, 'Segoe UI', sans-serif">
+  <rect width="1200" height="560" fill="#fafafa"/>
+
+  <!-- Sidebar -->
+  <rect x="0" y="0" width="280" height="560" fill="#f4f4f5"/>
+  <line x1="280" y1="0" x2="280" y2="560" stroke="#e4e4e7"/>
+  <text x="32" y="39" font-size="14" fill="#52525b">Trips</text>
+  <rect x="16" y="56" width="248" height="36" rx="8" fill="#18181b"/>
+  <text x="32" y="79" font-size="14" font-weight="600" fill="#ffffff">Check-ins</text>
+  <text x="32" y="119" font-size="14" fill="#52525b">Planner</text>
+
+  <!-- Page header -->
+  <text x="300" y="46" font-size="12" fill="#a1a1aa">← Check-ins</text>
+  <text x="300" y="80" font-size="24" font-weight="700" fill="#18181b">Import from Swarm</text>
+  <text x="300" y="104" font-size="13" fill="#71717a">Bring in your existing check-in history from a Swarm data export.</text>
+
+  <!-- Before: drop zone (shown as a labeled inset, since upload itself is a standard file picker) -->
+  <rect x="300" y="132" width="880" height="90" rx="10" fill="#ffffff" stroke="#d4d4d8" stroke-dasharray="6 4"/>
+  <text x="740" y="170" font-size="13" text-anchor="middle" fill="#52525b">Drop your Swarm export .zip here, or</text>
+  <text x="740" y="190" font-size="13" font-weight="600" text-anchor="middle" fill="#18181b">browse for a file</text>
+
+  <text x="300" y="252" font-size="12" fill="#a1a1aa">↓ once uploaded, the same page switches to a progress view — the job keeps running if you navigate away</text>
+
+  <!-- After: in-progress job card -->
+  <rect x="300" y="270" width="880" height="180" rx="10" fill="#ffffff" stroke="#e4e4e7"/>
+  <text x="324" y="300" font-size="15" font-weight="600" fill="#18181b">Importing your check-ins…</text>
+  <text x="1156" y="300" font-size="12" fill="#71717a" text-anchor="end">Resumable</text>
+
+  <rect x="324" y="316" width="832" height="10" rx="5" fill="#f4f4f5"/>
+  <rect x="324" y="316" width="540" height="10" rx="5" fill="#18181b"/>
+
+  <text x="324" y="352" font-size="13" fill="#18181b">842 of 1,204 check-ins imported</text>
+  <text x="324" y="372" font-size="13" fill="#71717a">310 of 890 photos fetched · 4 photos failed (skipped, not blocking)</text>
+
+  <rect x="324" y="396" width="150" height="34" rx="8" fill="#ffffff" stroke="#d4d4d8"/>
+  <text x="346" y="418" font-size="13" fill="#52525b">Run in background</text>
+
+  <text x="324" y="440" font-size="12" fill="#a1a1aa">You'll get a notification when this finishes. Safe to close this tab.</text>
+
+  <!-- Annotations -->
+  <text x="300" y="490" font-size="12" fill="#a1a1aa">Interrupting and restarting resumes from where it left off — never re-imports from scratch (de-duplicated via external_ref regardless).</text>
+  <text x="300" y="508" font-size="12" fill="#a1a1aa">A failed photo fetch is logged and skipped, not a blocking error — the check-in itself still imports without it.</text>
+  <text x="300" y="526" font-size="12" fill="#a1a1aa">Generic GPX/KML/GeoJSON/CSV import (the Wanderlog/Wanderlust/Google Takeout/Day One fallback) reuses this same page shape.</text>
+</svg>

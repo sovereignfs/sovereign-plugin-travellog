@@ -1,0 +1,22 @@
+/* Mirrors @sovereignfs/ui's ThreeColumnLayout.module.css `.shell`/`.main`/
+   `.detail` exactly — see MainDetailSplit.tsx's doc comment for why this
+   is a plugin-local re-implementation of that visual language rather than
+   the real component nested recursively. */
+.split {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+.list {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.detail {
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: var(--sv-color-surface-raised);
+  border-left: var(--sv-border-width-hairline) solid var(--sv-color-border);
+}

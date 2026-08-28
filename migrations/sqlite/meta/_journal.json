@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1787918317115,
+      "tag": "0000_nasty_darkhawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787927578198,
+      "tag": "0001_flimsy_dust",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787932847722,
+      "tag": "0002_vengeful_wind_dancer",
+      "breakpoints": true
+    }
+  ]
+}
