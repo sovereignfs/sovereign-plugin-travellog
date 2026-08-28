@@ -13,11 +13,27 @@ import {
   Spinner,
   SuggestionInput,
   useCommitOnEnterOrBlur,
+  useIsOffline,
   useToast,
   type SuggestionOption,
 } from '@sovereignfs/ui';
-import { createPlaceAction, createVisitAction, reverseGeocodePlaceAction, searchPlacesAction } from '../actions';
+import { offline } from '@sovereignfs/sdk/offline';
+import { offlineQueue } from '@sovereignfs/sdk/offline-queue';
+import {
+  createPlaceAction,
+  createVisitAction,
+  listRecentPlacesAction,
+  reverseGeocodePlaceAction,
+  searchPlacesAction,
+} from '../actions';
+import {
+  OFFLINE_CACHE_KEY_RECENT_PLACES,
+  OFFLINE_PLUGIN_ID,
+  OFFLINE_QUEUE_OP_CHECKIN,
+  type QueuedCheckinPayload,
+} from '../_lib/offline-cache';
 import type { PlaceCandidate } from '../_lib/place-provider';
+import type { RecentPlace } from '../_lib/queries';
 import { useCurrentPosition } from '../_lib/use-current-position';
 import type { CreateVisitPhotoInput } from '../_lib/visits';
 import styles from './page.module.css';
@@ -25,7 +41,12 @@ import styles from './page.module.css';
 const SEARCH_DEBOUNCE_MS = 250;
 const MIN_QUERY_LENGTH = 2;
 
-function candidateLocation(candidate: PlaceCandidate): string | null {
+/** Structurally compatible with both `PlaceCandidate` and `RecentPlace` — every call site passes one or the other. */
+function candidateLocation(candidate: {
+  category?: string | null;
+  city?: string | null;
+  country?: string | null;
+}): string | null {
   return [candidate.category, candidate.city, candidate.country].filter(Boolean).join(' · ') || null;
 }
 
@@ -45,11 +66,13 @@ export default function CheckInPage() {
   const router = useRouter();
   const toast = useToast();
   const position = useCurrentPosition();
+  const isOffline = useIsOffline();
 
   const [query, setQuery] = useState('');
   const [options, setOptions] = useState<PlaceCandidate[]>([]);
   const [searching, setSearching] = useState(false);
   const [gpsSuggestion, setGpsSuggestion] = useState<PlaceCandidate | null | undefined>(undefined);
+  const [recentPlaces, setRecentPlaces] = useState<RecentPlace[]>([]);
 
   const [selected, setSelected] = useState<PlaceCandidate | null>(null);
   const [selectedSource, setSelectedSource] = useState<'manual' | 'gps'>('manual');
@@ -57,6 +80,35 @@ export default function CheckInPage() {
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // `T.21` — feeds the offline picker below: while online, refresh the
+  // cache every time this screen mounts; offline, fall back to whatever was
+  // cached last time. A genuinely offline device can't search or create a
+  // *new* place at all (`_lib/queries.ts`'s `listRecentPlaces` doc
+  // comment), so this is the only place-selection path that still works
+  // with no network.
+  useEffect(() => {
+    let cancelled = false;
+    listRecentPlacesAction()
+      .then((places) => {
+        if (cancelled) return;
+        setRecentPlaces(places);
+        void offline.set(OFFLINE_PLUGIN_ID, OFFLINE_CACHE_KEY_RECENT_PLACES, places);
+      })
+      .catch(() => {
+        offline
+          .get<RecentPlace[]>(OFFLINE_PLUGIN_ID, OFFLINE_CACHE_KEY_RECENT_PLACES)
+          .then((cached) => {
+            if (!cancelled && cached) setRecentPlaces(cached);
+          })
+          .catch(() => {
+            // IndexedDB unavailable too — the picker just renders empty.
+          });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // One object URL per selected photo, revoked on change/unmount — never
   // created inline during render, which would mint a fresh (leaked) URL on
@@ -171,10 +223,60 @@ export default function CheckInPage() {
     return data.storageKey;
   }
 
+  /**
+   * `T.21` — no place/photo resolution here at all, unlike the online path:
+   * a genuinely offline device can only offer a place it already has a real
+   * `placeId` for (the Recent places picker below always sets
+   * `existingPlaceId`), and photo upload needs a network round-trip this
+   * flow deliberately doesn't attempt (see the "selected" branch's own
+   * offline hint). `offlineQueue.enqueue` applies the mutation to *this*
+   * screen's own optimistic feedback only (the confirmation toast) — it
+   * doesn't try to render an optimistic row in the Check-ins timeline,
+   * which isn't even mounted right now; `OfflineSyncBoundary`
+   * (`app/layout.tsx`) drains the queue against `syncOfflineCheckinAction`
+   * once back online, from wherever the user happens to be by then.
+   */
+  async function queueOfflineCheckIn(): Promise<void> {
+    if (!selected) return;
+    if (!selected.existingPlaceId) {
+      toast.show({
+        title: 'Couldn’t check in',
+        message: 'That place isn’t available offline — pick one from Recent places.',
+        category: 'error',
+      });
+      return;
+    }
+    const payload: QueuedCheckinPayload = {
+      placeId: selected.existingPlaceId,
+      placeName: selected.name,
+      happenedAt: Date.now(),
+      tzIana: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      tzOffsetMinutes: -new Date().getTimezoneOffset(),
+      note: note.trim() || undefined,
+    };
+    try {
+      await offlineQueue.enqueue(OFFLINE_PLUGIN_ID, OFFLINE_QUEUE_OP_CHECKIN, payload);
+      toast.show({
+        title: 'Queued',
+        message: `${selected.name} — will sync once you're back online.`,
+        category: 'success',
+      });
+      changePlace();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Something went wrong saving this offline.';
+      toast.show({ title: 'Couldn’t queue check-in', message, category: 'error' });
+    }
+  }
+
   async function handleCheckIn(): Promise<void> {
     if (!selected || submitting) return;
     setSubmitting(true);
     try {
+      if (isOffline) {
+        await queueOfflineCheckIn();
+        return;
+      }
+
       const placeId = await resolvePlaceId(selected);
       if (!placeId) {
         toast.show({
@@ -235,7 +337,56 @@ export default function CheckInPage() {
     <PageContainer maxWidth="sm">
       <PageHeader title="Check in" />
 
-      {!selected && (
+      {!selected && isOffline && (
+        <div className={styles.section}>
+          <p className={styles.offlineHint}>
+            You’re offline — search and new places aren’t available. Pick from somewhere you’ve
+            checked in before:
+          </p>
+          {recentPlaces.length === 0 ? (
+            <p className={styles.offlineHint}>
+              Nothing cached yet — open Check in once online first.
+            </p>
+          ) : (
+            recentPlaces.map((place) => (
+              <Card
+                key={place.id}
+                as="div"
+                interactive
+                className={styles.selectedSummary}
+                role="button"
+                tabIndex={0}
+                onClick={() =>
+                  choosePlace(
+                    { name: place.name, lat: place.lat, lng: place.lng, existingPlaceId: place.id },
+                    'manual',
+                  )
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    choosePlace(
+                      { name: place.name, lat: place.lat, lng: place.lng, existingPlaceId: place.id },
+                      'manual',
+                    );
+                  }
+                }}
+              >
+                <span className={styles.suggestionIcon}>
+                  <Icon name="map-pin" size="md" aria-hidden={true} />
+                </span>
+                <span className={styles.selectedSummaryMain}>
+                  <div className={styles.selectedSummaryName}>{place.name}</div>
+                  {candidateLocation(place) && (
+                    <div className={styles.selectedSummaryMeta}>{candidateLocation(place)}</div>
+                  )}
+                </span>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {!selected && !isOffline && (
         <div className={styles.section}>
           <Card
             as="div"
@@ -343,7 +494,9 @@ export default function CheckInPage() {
             </button>
           </div>
 
-          {photo && photoPreviewUrl ? (
+          {isOffline ? (
+            <p className={styles.offlineHint}>Photos aren’t available offline — add one later from Check-ins.</p>
+          ) : photo && photoPreviewUrl ? (
             <div className={styles.photoPreview}>
               <img src={photoPreviewUrl} alt="" className={styles.photoThumb} />
               <Button variant="secondary" size="sm" onClick={() => setPhoto(null)}>

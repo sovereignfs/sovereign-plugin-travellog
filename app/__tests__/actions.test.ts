@@ -128,6 +128,83 @@ describe('createVisitAction', () => {
   });
 });
 
+describe('listRecentPlacesAction (T.21)', () => {
+  it('returns the caller’s own recent places', async () => {
+    await actions.createVisitAction({
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+      source: 'manual',
+    });
+
+    const places = await actions.listRecentPlacesAction();
+    expect(places.map((p) => p.id)).toEqual([placeId]);
+  });
+
+  it('throws when called with no session', async () => {
+    harness.currentUser = null;
+    await expect(actions.listRecentPlacesAction()).rejects.toThrow();
+  });
+});
+
+describe('syncOfflineCheckinAction (T.21)', () => {
+  it('creates a visit tagged with the mutation id as externalRef', async () => {
+    const result = await actions.syncOfflineCheckinAction('mutation-1', {
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+    });
+    expect(result).toEqual({ ok: true, message: 'Synced.' });
+
+    const rows = await t.db.select().from(schema.visits);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: user1.userId, source: 'manual', externalRef: 'mutation-1' });
+  });
+
+  it('a replayed sync for an already-applied mutation id is a no-op, not a duplicate visit', async () => {
+    await actions.syncOfflineCheckinAction('mutation-1', {
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+    });
+    const result = await actions.syncOfflineCheckinAction('mutation-1', {
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(await t.db.select().from(schema.visits)).toHaveLength(1);
+  });
+
+  it('rejects an invalid timezone as an expected failure, not a throw', async () => {
+    const result = await actions.syncOfflineCheckinAction('mutation-1', {
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'Not/A_Real_Zone',
+      tzOffsetMinutes: 0,
+    });
+    expect(result.ok).toBe(false);
+    expect(await t.db.select().from(schema.visits)).toHaveLength(0);
+  });
+
+  it('throws when called with no session', async () => {
+    harness.currentUser = null;
+    await expect(
+      actions.syncOfflineCheckinAction('mutation-1', {
+        placeId,
+        happenedAt: Date.now(),
+        tzIana: 'Europe/Lisbon',
+        tzOffsetMinutes: 60,
+      }),
+    ).rejects.toThrow();
+  });
+});
+
 describe('updateVisitAction / deleteVisitAction — ownership', () => {
   it('denies updating another user’s visit without mutating it, reading as "not found"', async () => {
     const theirs = await createVisit(t.travellog, user1, {

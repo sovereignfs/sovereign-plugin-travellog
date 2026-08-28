@@ -2,8 +2,20 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Badge, Button, Card, EmptyState, Icon, PageContainer, PageHeader, Spinner } from '@sovereignfs/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Icon,
+  PageContainer,
+  PageHeader,
+  Spinner,
+  useIsOffline,
+} from '@sovereignfs/ui';
+import { offline } from '@sovereignfs/sdk/offline';
 import { getTripModeAction, type TripModeView } from '../actions';
+import { OFFLINE_CACHE_KEY_TRIP_MODE, OFFLINE_PLUGIN_ID, type CachedTripMode } from '../_lib/offline-cache';
 import { formatCountdown } from '../_lib/trip-mode';
 import { useCurrentPosition } from '../_lib/use-current-position';
 import styles from './TripModeScreen.module.css';
@@ -48,10 +60,23 @@ function mapsHandoffUrl(item: {
  * `Intl`-resolved zone) — the server has no way to know either just from
  * the request, same rule `checkin/page.tsx`'s own check-in submission
  * already follows for `tzIana`.
+ *
+ * `T.21` — offline-cache read/write-through (`@sovereignfs/sdk/offline`,
+ * same "render cache immediately, always attempt a fresh fetch, let a
+ * successful fetch win" pattern `plugins/launcher`'s `LauncherOfflineView`
+ * establishes, the only other `offline-first` plugin in this repo). Only a
+ * *populated* result is ever cached — a confirmed "not active today" is
+ * real, common, expected state for most of a trip's lifecycle, not
+ * something worth overwriting a still-somewhat-relevant cached itinerary
+ * with; the tradeoff is a stale cached trip can outlive its own active
+ * window if the screen is never reopened during a later real one, which
+ * only means the bare route's shortcut leads to a screen that itself
+ * correctly resolves to "not active" once opened — not a correctness bug.
  */
 export function TripModeScreen({ tripId, tripName }: { tripId: string; tripName: string }) {
   const router = useRouter();
   const position = useCurrentPosition();
+  const isOffline = useIsOffline();
   // `undefined` = still loading; `null` = resolved, but Trip Mode isn't
   // active right now (no stop covers today) — distinct states, not the
   // same "nothing to show yet" bucket.
@@ -59,17 +84,43 @@ export function TripModeScreen({ tripId, tripName }: { tripId: string; tripName:
 
   useEffect(() => {
     let cancelled = false;
-    getTripModeAction(tripId, Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone)
-      .then((result) => {
-        if (!cancelled) setView(result);
+
+    offline
+      .get<CachedTripMode>(OFFLINE_PLUGIN_ID, OFFLINE_CACHE_KEY_TRIP_MODE)
+      .then((cached) => {
+        if (cancelled || !cached || cached.tripId !== tripId) return;
+        // Only fills in while still "loading" — a fetch that's already
+        // resolved (success or failure) is never downgraded back to a
+        // stale cached value arriving late.
+        setView((current) => (current === undefined ? cached.view : current));
       })
       .catch(() => {
-        if (!cancelled) setView(null);
+        // IndexedDB unavailable — the live fetch below still decides the render.
       });
+
+    getTripModeAction(tripId, Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone)
+      .then((result) => {
+        if (cancelled) return;
+        setView(result);
+        if (result) {
+          void offline.set<CachedTripMode>(OFFLINE_PLUGIN_ID, OFFLINE_CACHE_KEY_TRIP_MODE, {
+            tripId,
+            tripName,
+            view: result,
+          });
+        }
+      })
+      .catch(() => {
+        // Offline (or a real error) — keep whatever the cache read above
+        // already rendered; only fall to the inactive/unavailable state if
+        // nothing was ever cached for this trip.
+        if (!cancelled) setView((current) => (current === undefined ? null : current));
+      });
+
     return () => {
       cancelled = true;
     };
-  }, [tripId]);
+  }, [tripId, tripName]);
 
   const backToPlanner = (): void => router.push(`/travellog/planner/${tripId}`);
 
@@ -85,13 +136,23 @@ export function TripModeScreen({ tripId, tripName }: { tripId: string; tripName:
   }
 
   if (view === null) {
+    // Two different reasons collapse into this one state: a confirmed
+    // "no stop covers today," or a fetch that failed with nothing ever
+    // cached for this trip — genuinely different situations, so `isOffline`
+    // picks between `docs/plugin-development.md`'s own suggested copy for
+    // the latter ("Not available offline yet — open once online") and the
+    // normal explanation for the former.
     return (
       <PageContainer maxWidth="sm">
         <PageHeader title={tripName} onBack={backToPlanner} />
         <EmptyState
           icon="route"
-          heading="Trip Mode isn’t active right now"
-          description="Trip Mode only works during a stop's real dates. Open the trip in Planner to check the itinerary."
+          heading={isOffline ? 'Not available offline yet' : 'Trip Mode isn’t active right now'}
+          description={
+            isOffline
+              ? 'Open Travellog once online to cache this trip’s itinerary for offline viewing.'
+              : "Trip Mode only works during a stop's real dates. Open the trip in Planner to check the itinerary."
+          }
           action={<Button onClick={backToPlanner}>Open in Planner</Button>}
         />
       </PageContainer>

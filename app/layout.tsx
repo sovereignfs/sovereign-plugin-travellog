@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { sdk } from '@sovereignfs/sdk';
 import { ToastProvider } from '@sovereignfs/ui';
+import { OfflineSyncBoundary } from './_components/OfflineSyncBoundary';
 import { TravellogHeader } from './_components/TravellogHeader';
 import styles from './travellog.module.css';
 
@@ -34,6 +35,7 @@ export default async function TravellogLayout({ children }: { children: ReactNod
         <TravellogHeader instanceName={instanceName} />
         <div className={styles.body}>{children}</div>
       </div>
+      <OfflineSyncBoundary />
     </ToastProvider>
   );
 }

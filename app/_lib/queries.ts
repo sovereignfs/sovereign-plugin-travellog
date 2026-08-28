@@ -137,6 +137,77 @@ export async function getVisitTimelinePage(
 }
 
 // ---------------------------------------------------------------------------
+// Recent places (T.21)
+
+export interface RecentPlace {
+  id: string;
+  name: string;
+  category: string | null;
+  city: string | null;
+  country: string | null;
+  lat: number | null;
+  lng: number | null;
+}
+
+const RECENT_PLACES_SCAN_LIMIT = 200;
+const RECENT_PLACES_LIMIT = 15;
+
+/**
+ * Distinct places from the caller's own most recent check-ins, most-recently-
+ * visited first — `T.21`'s offline check-in picker reads this cached
+ * client-side (`sdk.offline`), since a device with no network at all can't
+ * search or create a *new* place, only re-select one it already knows.
+ *
+ * Scans the most recent `RECENT_PLACES_SCAN_LIMIT` visits (indexed, cheap —
+ * `travellog_visits_user_happened_idx`) and dedupes by place in application
+ * code, rather than a `DISTINCT ON`/window-function query: SQLite has no
+ * `DISTINCT ON`, and this plugin's queries run portably across both dialects
+ * through the same sqlite-core query builder (`_db/client.ts`). A place that
+ * hasn't come up in a caller's last 200 check-ins isn't "recent" in any
+ * meaningful sense, so bounding the scan rather than paging the caller's
+ * entire history (which can span a decade of imports) is the right tradeoff.
+ */
+export async function listRecentPlaces(
+  db: TravellogDb,
+  actor: Actor,
+  limit = RECENT_PLACES_LIMIT,
+): Promise<RecentPlace[]> {
+  const rows = await db
+    .select({
+      placeId: schema.places.id,
+      name: schema.places.name,
+      category: schema.places.category,
+      city: schema.places.city,
+      country: schema.places.country,
+      lat: schema.places.lat,
+      lng: schema.places.lng,
+    })
+    .from(schema.visits)
+    .innerJoin(schema.places, eq(schema.places.id, schema.visits.placeId))
+    .where(and(eq(schema.visits.userId, actor.userId), eq(schema.visits.tenantId, actor.tenantId)))
+    .orderBy(desc(schema.visits.happenedAt))
+    .limit(RECENT_PLACES_SCAN_LIMIT);
+
+  const seen = new Set<string>();
+  const result: RecentPlace[] = [];
+  for (const row of rows) {
+    if (seen.has(row.placeId)) continue;
+    seen.add(row.placeId);
+    result.push({
+      id: row.placeId,
+      name: row.name,
+      category: row.category,
+      city: row.city,
+      country: row.country,
+      lat: row.lat,
+      lng: row.lng,
+    });
+    if (result.length >= limit) break;
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Detail (payload 5)
 
 export interface VisitDetail {

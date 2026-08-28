@@ -7,11 +7,163 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.20` shipped, manifest at `0.22.0` (`T.5a`, slot
+🚧 In progress — `T.1`–`T.21` shipped, manifest at `0.23.0` (`T.5a`, slot
 `0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block
-`T.6`–`T.20`). Slice 1 (web) is feature-complete; Slice 2 (web) is
-ship-ready; Slice 3 (Trip Mode) is now fully built — data/logic layer,
-mobile screen, and reminders — `T.21` (offline capability wiring) is next.
+`T.6`–`T.21`). Slice 1 (web) is feature-complete; Slice 2 (web) is
+ship-ready; Slice 3 (Trip Mode) is now fully built, including offline
+support — `T.22` (Slice 3 hardening & release pass) is next.
+
+**`T.21` — Offline capability wiring (`0.23.0`).** "Trip Mode and check-in
+work in a dead zone." The task's own deliverable text flagged this as "the
+one task in this spec with a real external dependency risk" and told the
+implementer to re-check workstream 0008's actual state before starting —
+that check changed the whole shape of the work.
+
+**The dependency risk didn't land where the spec expected.** Workstream
+0008's own status line says leg 5 ("Background sync") is not started —
+sounds disqualifying for "check-in queues locally and syncs on reconnect."
+But reading past the status line: leg 5 is a *bigger, platform-orchestrated*
+sync engine (research 0012 explicitly rejected building a continuous
+bidirectional sync engine — "network-first-with-local-fallback," not
+"continuous local-first sync"). The primitive this task actually needs —
+`@sovereignfs/sdk/offline` (a read-only IndexedDB cache) and
+`@sovereignfs/sdk/offline-queue` (a client-driven mutation queue,
+`enqueue()`/`drainQueue()`) — shipped years earlier under leg 3 (RFC 0078),
+fully implemented, unit-tested, and documented in
+`docs/plugin-development.md` with a complete apply-contract spec (client-
+minted idempotency ids, last-write-wins timestamps, sequential-apply-halt-
+on-failure). It had exactly one real consumer before this task
+(`plugins/launcher`'s read-only `LauncherOfflineView`) and, per a direct
+repo-wide grep confirmed before writing a line of code, **zero** real
+consumers of the write-queue half — this task is the first plugin to
+actually build a `sdk.offline-queue` sync endpoint against the documented
+contract, not just its own unit tests.
+
+**The bare route needed a real rewrite, not just a manifest flag.**
+`app/page.tsx` was an unconditional `redirect('/travellog/checkins')` —
+passes `runtime/src/__tests__/offline-route-neutrality.test.ts`'s static
+scan cleanly (a `redirect()` call trips none of its four forbidden-
+identity-access patterns) but fails the actual contract: the platform only
+precaches the plugin's exact bare route, so a precached redirect into a
+per-user SSR page the platform never cached just fails again the moment
+there's no network to follow it with. Replaced with a plain, synchronous,
+data-fetch-free Server Component (`page.tsx`) wrapping a new client
+component (`OfflineHomeView.tsx`) — matching `plugins/launcher/app/page.tsx`'s
+own precedent exactly, the only other first-party `offline-first` plugin
+in this repo. `OfflineHomeView` shows a primary "Check in" action (always
+available per `CONCEPT.md`'s own framing, online or offline) plus a
+"Trip in progress" card when `TripModeScreen` has cached one — no live
+fetch of its own; it just reads whatever the trip screen last wrote.
+
+**One shared cache entry serves two different screens.** `TripModeScreen`
+(`T.19`) now reads `sdk.offline` on mount (render cache immediately if
+present, always attempt a fresh fetch, let a successful fetch win — same
+pattern `LauncherOfflineView` established) and writes back on every
+*populated* successful fetch — deliberately never on a confirmed "not
+active today," since that's normal, expected state for most of a trip's
+lifecycle, not something worth overwriting a still-relevant cached
+itinerary with. `OfflineHomeView` reads that exact same cache key
+(`OFFLINE_CACHE_KEY_TRIP_MODE`, centralized with every other offline
+constant in a new `_lib/offline-cache.ts`) with no `tripId` of its own to
+fetch with — it doesn't need one, since it's just showing whatever the
+trip screen already resolved.
+
+**Offline check-in is deliberately narrower than the online flow, not a
+full parity clone.** A genuinely offline device can search for a place
+(needs Nominatim) or create a new one (needs a server round-trip) — neither
+works with no network. So the offline path only ever offers a place the
+caller already has a real `placeId` for: a new `listRecentPlaces` query
+(`_lib/queries.ts`) returns the caller's own most-recently-visited distinct
+places (scans the most recent 200 visits, dedupes in code — SQLite has no
+`DISTINCT ON` and this plugin's queries run portably across both dialects
+through one query builder), cached client-side
+(`OFFLINE_CACHE_KEY_RECENT_PLACES`) every time the check-in screen mounts
+online. Photo upload is out of scope too (needs a network round trip) —
+`checkin/page.tsx` shows a plain explanatory line instead of the file
+dropzone when `useIsOffline()` (`@sovereignfs/ui`) is true, rather than
+silently omitting the control. Both are honest, scope-appropriate
+limitations, not gaps — the review checklist asks for a working queue-and-
+sync round trip, not full offline feature parity.
+
+**Idempotency reuses existing infrastructure instead of inventing new
+infrastructure.** `sdk.offline-queue`'s own `QueuedMutation.id` is already
+a client-minted UUID (RFC 0078's own idempotency-key requirement) — this
+task threads it straight through as the created visit's `externalRef`,
+leaning on `travellog_visits_tenant_source_external_ref_unique` (`T.2`),
+the same unique index `T.8`'s Swarm importer already relies on for its own
+de-dup. New `isVisitAlreadySynced(db, actor, source, externalRef)` in
+`_lib/visits.ts` generalizes `isVisitAlreadyImported`'s exact shape (a
+pre-check backstopped by the real unique index, not the enforcement point
+itself) to a caller-given `source` rather than hardcoding `'import:swarm'`.
+A new, dedicated `syncOfflineCheckinAction(mutationId, input)` — not an
+extension of `createVisitAction`'s public shape, which deliberately
+excludes `externalRef` as a client-controllable field for the same reason
+`T.8`'s importer already bypasses it and calls `createVisit()` directly.
+`OfflineSyncBoundary.tsx`, mounted once in `app/layout.tsx` (present on
+every page this plugin renders, not just the check-in screen that created
+a queued mutation), calls `drainQueue()` on mount and on the `window`
+`'online'` event — `sdk.offline-queue` has no platform-orchestrated
+background sync (no iOS Safari support for the Background Sync API), so a
+plugin has to trigger this itself, and doing it from the shared layout
+means a check-in queued on one page syncs correctly even if the user
+reconnects while looking at a completely different screen.
+
+**Two false-positive findings in `offline-route-neutrality.test.ts`,
+handled differently depending on whose problem they actually were.** Two
+were self-inflicted: this task's own doc comments in `page.tsx` and
+`trip-mode-reminders.ts` literally contained the substrings `headers()`/
+`cookies()`/`next/headers()` as prose describing what the code does *not*
+do — the test is a pure text regex scan with no understanding of comments,
+so it flagged its own explanation. Fixed by rewording both comments to
+never spell out the literal API call names. The third was real code
+(`actions.ts`'s `resumeImportAction`, `T.8`, genuinely calls `headers()`)
+but a false positive at the file-collection level, not the pattern-match
+level: reproduced the test's own file-collection logic directly and found
+it sweeps **86 files** for this plugin — every `_lib`, `_components`,
+`_jobs`, `_db` file, every `__tests__/*.test.ts`, and the plugin's shared
+`actions.ts` — none reachable from the bare route's own render at all,
+since the "recurse into any `_`-prefixed dir under `app/`" heuristic was
+only ever validated against Launcher, a single-route plugin with one
+`_components/` file. `resumeImportAction`'s `headers()` call is inside a
+POST-only server action, never part of any GET-rendered, service-worker-
+precached response — a real gap in the test's own design for a plugin with
+more than one route, not a security issue in this plugin's bare route.
+Flagged as a platform follow-up (with the exact false-positive proof and a
+concrete fix direction) rather than fixed here, for the same reason the
+`sdk.env.get()` gap was flagged rather than fixed during `T.20`: fixing a
+shared CI test correctly is platform-repo work, and this session's
+platform checkout was mid-flight on an unrelated branch for that exact
+earlier fix, so touching it risked colliding with a concurrently-running
+session.
+
+**Live-verified end to end against the real running stack, not just unit
+tests.** Restarted the dev server (manifest `offline` field composition
+depends on the generated registry, confirmed directly by grepping
+`runtime/generated/registry.ts` before and after). Confirmed the new bare
+route renders real content instead of redirecting; confirmed via direct
+IndexedDB inspection (`sovereign-offline` database) that `TripModeScreen`
+genuinely wrote an encrypted cache entry after a real fetch, and that
+`OfflineHomeView` — a completely independent consumer — correctly read and
+rendered that exact entry as a "Trip in progress" card. For the check-in
+queue: dispatched a synthetic `window` `'offline'` event (the same signal
+`useIsOffline()` listens for; the platform's own top-level offline banner
+reacted to it too, confirming this is the real signal, not a bespoke one)
+— the UI correctly swapped to the recent-places picker populated with
+genuine cached check-in history, hid the photo control with the offline
+hint, and queuing a real check-in produced a "Queued" toast and a real
+entry in the `sovereign-offline-queue` IndexedDB database. Dispatching a
+synthetic `'online'` event triggered `OfflineSyncBoundary`, which fired a
+real POST to the check-in server action; confirmed the queue drained to
+empty and the Check-ins timeline showed exactly one new, correctly auto-
+linked visit — no duplicate, despite dev mode issuing two overlapping POST
+attempts (the second aborted) for the same drain. This exercises the
+plugin's actual production code paths end-to-end (the same `isOffline`
+boolean this synthetic event drives is what real disconnection would set),
+short of literally cutting the host machine's network — noted here
+plainly rather than overclaiming a hardware-level airplane-mode test.
+
+Full check suite clean: `format:check`, `lint`, this package's `typecheck`,
+`design:tokens:check`, and all 355 travellog tests pass.
 
 **`T.20` — Notification reminders (`0.22.0`).** "Your next stop is in 20
 minutes" — a manifest-declared `schedules` handler (`app/_jobs/trip-mode-reminders.ts`,

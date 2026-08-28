@@ -190,6 +190,36 @@ export async function isVisitAlreadyImported(
   return rows.length > 0;
 }
 
+/**
+ * `T.21`'s de-dup check for a synced offline check-in — the same
+ * `travellog_visits_tenant_source_external_ref_unique` backstop
+ * `isVisitAlreadyImported` above already leans on, generalized to a
+ * caller-given `source` rather than hardcoding `'import:swarm'`: a resumed
+ * `drainQueue()` replaying the same client-minted mutation id (RFC 0078's
+ * idempotent-apply contract — `docs/plugin-development.md`'s "Offline
+ * writes" section) must be a no-op, not a duplicate visit.
+ */
+export async function isVisitAlreadySynced(
+  db: TravellogDb,
+  actor: Actor,
+  source: VisitSource,
+  externalRef: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: schema.visits.id })
+    .from(schema.visits)
+    .where(
+      and(
+        eq(schema.visits.tenantId, actor.tenantId),
+        eq(schema.visits.userId, actor.userId),
+        eq(schema.visits.source, source),
+        eq(schema.visits.externalRef, externalRef),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
 export interface AddVisitPhotoInput {
   storageKey: string;
   source: 'upload' | 'import';

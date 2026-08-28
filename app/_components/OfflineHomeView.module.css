@@ -1,0 +1,78 @@
+.title {
+  margin: 0 0 var(--sv-space-4);
+  font-size: var(--sv-font-size-2xl);
+  font-weight: 700;
+  color: var(--sv-color-text-primary);
+}
+
+.checkinLink {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sv-space-2);
+  padding: var(--sv-space-3) var(--sv-space-4);
+  border-radius: var(--sv-radius-md);
+  background: var(--sv-color-text-primary);
+  color: var(--sv-color-surface);
+  font-size: var(--sv-font-size-md);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.tripCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-1);
+  margin-top: var(--sv-space-4);
+}
+
+.tripLabel {
+  font-size: var(--sv-font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--sv-color-text-muted);
+}
+
+.tripName {
+  font-size: var(--sv-font-size-lg);
+  font-weight: 700;
+  color: var(--sv-color-text-primary);
+}
+
+.tripMeta {
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-muted);
+}
+
+.tripLink {
+  margin-top: var(--sv-space-2);
+  align-self: flex-start;
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+}
+
+.hint {
+  margin: var(--sv-space-4) 0 0;
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-muted);
+}
+
+.nav {
+  display: flex;
+  gap: var(--sv-space-4);
+  margin-top: var(--sv-space-6);
+  padding-top: var(--sv-space-4);
+  border-top: var(--sv-border-width-hairline) solid var(--sv-color-border);
+  font-size: var(--sv-font-size-sm);
+}
+
+.nav a {
+  color: var(--sv-color-text-subtle);
+  text-decoration: none;
+}
+
+.nav a:hover {
+  text-decoration: underline;
+}

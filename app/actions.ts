@@ -62,6 +62,8 @@ import { createPlace, type PlaceRow } from './_lib/places';
 import {
   getVisitDetail,
   getVisitTimelinePage,
+  listRecentPlaces,
+  type RecentPlace,
   type VisitDetail,
   type VisitTimelineCursor,
   type VisitTimelinePage,
@@ -87,6 +89,7 @@ import { createTrip, deleteTrip, updateTrip, type TripRow, type UpdateTripInput 
 import {
   createVisit,
   deleteVisit,
+  isVisitAlreadySynced,
   setVisitTripLink,
   updateVisit,
   type CreateVisitPhotoInput,
@@ -207,6 +210,62 @@ export async function createVisitAction(input: CreateVisitActionInput): Promise<
   await createVisit(db, actor, input);
   refresh();
   return ok('Checked in.');
+}
+
+/** A read, not a mutation. `T.21`'s offline check-in picker caches this client-side (`sdk.offline`) while online, for later selection with no network at all. */
+export async function listRecentPlacesAction(): Promise<RecentPlace[]> {
+  const actor = await requireUser();
+  const db = await getDb();
+  return listRecentPlaces(db, actor);
+}
+
+/**
+ * `T.21` — applies one queued offline check-in (`sdk.offline-queue`'s
+ * `drainQueue()`), keyed by the mutation's own client-minted `id` rather
+ * than `createVisitAction`'s narrower public shape above (which
+ * deliberately excludes `externalRef` — see that action's own doc
+ * comment). A dedicated action, not an extension of `createVisitAction`,
+ * for the same reason `T.8`'s importer calls `createVisit()` directly
+ * instead of going through it: a different caller, a different input
+ * shape, no reason to widen the normal per-visit form's own narrower
+ * contract to accommodate it.
+ *
+ * Only ever offers a `placeId` the client already has — genuinely offline,
+ * there's no way to search or create a *new* place (`_lib/queries.ts`'s
+ * `listRecentPlaces` doc comment), so unlike `createVisitAction`, this
+ * never resolves/creates a place itself.
+ *
+ * Idempotent by construction (RFC 0078 §4's apply contract,
+ * `docs/plugin-development.md`'s "Offline writes" section): `mutationId`
+ * becomes the created visit's `externalRef`, and a retried apply for a
+ * mutation already synced — a resumed `drainQueue()` after a dropped
+ * response, for instance — is a no-op `ok` rather than a duplicate visit.
+ */
+export interface SyncOfflineCheckinInput {
+  placeId: string;
+  happenedAt: number;
+  tzIana: string;
+  tzOffsetMinutes: number;
+  note?: string;
+}
+
+export async function syncOfflineCheckinAction(
+  mutationId: string,
+  input: SyncOfflineCheckinInput,
+): Promise<ActionResult> {
+  const actor = await requireUser();
+
+  if (input.placeId.trim().length === 0) return fail('A check-in needs a place.');
+  if (!Number.isFinite(input.happenedAt)) return fail('A check-in needs a real date and time.');
+  if (!isValidIanaTimeZone(input.tzIana)) return fail("That timezone doesn't look valid.");
+
+  const db = await getDb();
+  const alreadySynced = await isVisitAlreadySynced(db, actor, 'manual', mutationId);
+  if (!alreadySynced) {
+    await createVisit(db, actor, { ...input, source: 'manual', externalRef: mutationId });
+    refresh();
+  }
+  return ok('Synced.');
 }
 
 export async function updateVisitAction(

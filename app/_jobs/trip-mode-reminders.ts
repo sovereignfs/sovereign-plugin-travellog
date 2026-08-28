@@ -9,12 +9,13 @@
  *
  * The lead time is a plain constant, not a manifest `env` var, despite
  * `NOMINATIM_BASE_URL`'s precedent for exactly that pattern elsewhere in
- * this plugin — `sdk.env.get()` calls `next/headers()` with no fallback for
- * a background invocation, so it throws outright from a `schedules`
- * handler instead of returning `null` (the same bug class `sdk.storage.*`
- * had before this session's earlier platform fix; flagged as a follow-up,
- * not fixed here — see the platform repo). Declaring an env var that
- * silently can never be read would be worse than not offering one.
+ * this plugin — `sdk.env.get()` reads Next's request-scoped headers API
+ * with no fallback for a background invocation, so it throws outright from
+ * a `schedules` handler instead of returning `null` (the same bug class
+ * `sdk.storage.*` had before this session's earlier platform fix; flagged
+ * as a follow-up, not fixed here — see the platform repo). Declaring an
+ * env var that silently can never be read would be worse than not
+ * offering one.
  */
 import { sdk, type ScheduleContext } from '@sovereignfs/sdk';
 import type { TravellogDb } from '../_db/client';

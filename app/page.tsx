@@ -1,16 +1,26 @@
-import { redirect } from 'next/navigation';
+import { OfflineHomeView } from './_components/OfflineHomeView';
 
 /**
- * The bare `routePrefix` page redirects to Check-ins, not Trips, for now.
- * SPEC.md's Routes section documents the eventual home as Trips (the real
- * browse/manage/share hub once `T.13` ships it) — correct for the finished
- * product, but landing a fresh user on Trips' "coming soon" placeholder
- * today directly undercuts CONCEPT.md's own Slice 1 framing ("ships
- * standalone and useful... check-in ships first because it's the daily-use
- * half"). Found live during `T.9`'s audit. Move this back to
- * `/travellog/trips` once `T.13` ships Trips for real — SPEC.md's Routes
- * section notes this as the intended final state.
+ * `T.21` — this plugin's one offline-capable entry point
+ * (`manifest.json`'s `offline: 'offline-first'`;
+ * `docs/plugin-development.md`'s "offline" section). Previously an
+ * unconditional `redirect('/travellog/checkins')` — that satisfied
+ * `runtime/src/__tests__/offline-route-neutrality.test.ts`'s static scan
+ * (a `redirect()` call trips none of its four forbidden-identity-access
+ * patterns) but not the actual offline contract: the platform only
+ * precaches this exact route, so a precached redirect into a per-user SSR
+ * page the platform has never cached fails the moment there's no network
+ * to follow it with — exactly the gap `SPEC.md`'s own T.21 deliverable
+ * flagged for re-checking once this task actually started.
+ *
+ * A plain, synchronous Server Component — no data fetch, no request-scoped
+ * headers, cookies, or session read of any kind, so its SSR output is
+ * identical for every user and safe to precache and replay on a shared
+ * device. Everything real (cached trip summary, check-in entry point) is
+ * `OfflineHomeView`'s job, client-side, matching
+ * `plugins/launcher/app/page.tsx`'s own precedent — the only other
+ * first-party `offline-first` plugin in this repo.
  */
 export default function TravellogRootPage() {
-  redirect('/travellog/checkins');
+  return <OfflineHomeView />;
 }

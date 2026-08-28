@@ -12,6 +12,7 @@ import {
   getTripsOverview,
   getVisitDetail,
   getVisitTimelinePage,
+  listRecentPlaces,
   listTripCards,
   listTripsForPicker,
   listWorkspaceDays,
@@ -535,5 +536,107 @@ describe('listWorkspaceDays (T.16, payload 7’s day list)', () => {
     const trip = await createTrip(t.travellog, otherActor, 'Not mine');
     await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
     expect(await listWorkspaceDays(t.travellog, actor, trip.id)).toEqual([]);
+  });
+});
+
+describe('listRecentPlaces (T.21)', () => {
+  it('is empty with no check-in history', async () => {
+    expect(await listRecentPlaces(t.travellog, actor)).toEqual([]);
+  });
+
+  it('orders by most recently visited', async () => {
+    const porto = await createPlace(t.travellog, actor, { name: 'Porto', source: 'manual' });
+    await createVisit(t.travellog, actor, {
+      placeId,
+      happenedAt: Date.UTC(2026, 7, 25),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+      source: 'manual',
+    });
+    await createVisit(t.travellog, actor, {
+      placeId: porto.id,
+      happenedAt: Date.UTC(2026, 7, 27),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+      source: 'manual',
+    });
+
+    const recent = await listRecentPlaces(t.travellog, actor);
+    expect(recent.map((p) => p.name)).toEqual(['Porto', 'Belém Tower']);
+  });
+
+  it('dedupes repeat visits to the same place, keeping only its most recent position', async () => {
+    await createVisit(t.travellog, actor, {
+      placeId,
+      happenedAt: Date.UTC(2026, 7, 20),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+      source: 'manual',
+    });
+    const porto = await createPlace(t.travellog, actor, { name: 'Porto', source: 'manual' });
+    await createVisit(t.travellog, actor, {
+      placeId: porto.id,
+      happenedAt: Date.UTC(2026, 7, 25),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+      source: 'manual',
+    });
+    // Re-visits the first place, most recently of all three.
+    await createVisit(t.travellog, actor, {
+      placeId,
+      happenedAt: Date.UTC(2026, 7, 27),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+      source: 'manual',
+    });
+
+    const recent = await listRecentPlaces(t.travellog, actor);
+    expect(recent.map((p) => p.name)).toEqual(['Belém Tower', 'Porto']);
+  });
+
+  it('respects the limit parameter', async () => {
+    for (let i = 0; i < 5; i++) {
+      const place = await createPlace(t.travellog, actor, { name: `Place ${String(i)}`, source: 'manual' });
+      await createVisit(t.travellog, actor, {
+        placeId: place.id,
+        happenedAt: Date.UTC(2026, 7, i + 1),
+        tzIana: 'Europe/Lisbon',
+        tzOffsetMinutes: 60,
+        source: 'manual',
+      });
+    }
+
+    expect(await listRecentPlaces(t.travellog, actor, 3)).toHaveLength(3);
+  });
+
+  it('scopes to the caller — another user’s check-in history never leaks in', async () => {
+    await createVisit(t.travellog, otherUserSameTenant, {
+      placeId,
+      happenedAt: Date.UTC(2026, 7, 25),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+      source: 'manual',
+    });
+
+    expect(await listRecentPlaces(t.travellog, actor)).toEqual([]);
+  });
+
+  it('carries coordinates through for the offline check-in queue payload', async () => {
+    const geocoded = await createPlace(t.travellog, actor, {
+      name: 'Torre de Belém',
+      source: 'manual',
+      lat: 38.691586,
+      lng: -9.2159288,
+    });
+    await createVisit(t.travellog, actor, {
+      placeId: geocoded.id,
+      happenedAt: Date.UTC(2026, 7, 25),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+      source: 'manual',
+    });
+
+    const [recent] = await listRecentPlaces(t.travellog, actor);
+    expect(recent).toMatchObject({ lat: 38.691586, lng: -9.2159288 });
   });
 });

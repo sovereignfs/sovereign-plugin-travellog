@@ -3,7 +3,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../_db/schema';
 import { createTestDb, type TestDb } from '../../_db/__tests__/test-db';
 import { createPlace } from '../places';
-import { addVisitPhoto, createVisit, deleteVisit, isVisitAlreadyImported, updateVisit } from '../visits';
+import {
+  addVisitPhoto,
+  createVisit,
+  deleteVisit,
+  isVisitAlreadyImported,
+  isVisitAlreadySynced,
+  updateVisit,
+} from '../visits';
 
 const actor = { tenantId: 'tenant-1', userId: 'user-1' };
 
@@ -236,6 +243,58 @@ describe('isVisitAlreadyImported (T.8)', () => {
       externalRef: 'swarm-checkin-1',
     });
     expect(await isVisitAlreadyImported(t.travellog, actor, 'swarm-checkin-1')).toBe(false);
+  });
+});
+
+describe('isVisitAlreadySynced (T.21)', () => {
+  it('is false before a sync, true after', async () => {
+    expect(await isVisitAlreadySynced(t.travellog, actor, 'manual', 'mutation-1')).toBe(false);
+
+    await createVisit(t.travellog, actor, {
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'UTC',
+      tzOffsetMinutes: 0,
+      source: 'manual',
+      externalRef: 'mutation-1',
+    });
+
+    expect(await isVisitAlreadySynced(t.travellog, actor, 'manual', 'mutation-1')).toBe(true);
+  });
+
+  it('scopes to the given source — a swarm import with the same externalRef never matches a manual sync', async () => {
+    await createVisit(t.travellog, actor, {
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'UTC',
+      tzOffsetMinutes: 0,
+      source: 'import:swarm',
+      externalRef: 'mutation-1',
+    });
+    expect(await isVisitAlreadySynced(t.travellog, actor, 'manual', 'mutation-1')).toBe(false);
+  });
+
+  it('scopes to the given user — another user’s synced mutation id never matches', async () => {
+    await createVisit(t.travellog, { tenantId: 'tenant-1', userId: 'user-2' }, {
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'UTC',
+      tzOffsetMinutes: 0,
+      source: 'manual',
+      externalRef: 'mutation-1',
+    });
+    expect(await isVisitAlreadySynced(t.travellog, actor, 'manual', 'mutation-1')).toBe(false);
+  });
+
+  it('does not match a normal manual visit with no externalRef', async () => {
+    await createVisit(t.travellog, actor, {
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'UTC',
+      tzOffsetMinutes: 0,
+      source: 'manual',
+    });
+    expect(await isVisitAlreadySynced(t.travellog, actor, 'manual', 'mutation-1')).toBe(false);
   });
 });
 

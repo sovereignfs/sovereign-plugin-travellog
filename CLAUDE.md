@@ -154,7 +154,7 @@ Don't invent detail here ahead of its own pass — flag it and ask instead:
 
 ## Status
 
-Current manifest version: `0.22.0` (`T.1`–`T.20` shipped — Slice 1 web is
+Current manifest version: `0.23.0` (`T.1`–`T.21` shipped — Slice 1 web is
 feature-complete; Slice 2 (web) is ship-ready per its own review checklist
 — data model, server layer, auto-link engine, Trips, and the whole Planner
 all exist, audited live against `CONCEPT.md` in `T.17`, which also closed
@@ -163,10 +163,16 @@ layer since `T.10`/`T.11` but no web UI until now. Slice 3 (Trip Mode) is
 now fully built — data/logic layer (`T.18`'s `resolveTripModeToday`), the
 actual mobile screen (`T.19`'s `/travellog/planner/[tripId]/mode`, incl.
 the Apple Maps universal-link hand-off, verified live on a real iOS
-Simulator), and reminders (`T.20`'s `schedules` handler, deriving a stop's
+Simulator), reminders (`T.20`'s `schedules` handler, deriving a stop's
 timezone from its place coordinates since no other reliable source exists
 in a background handler — live-verified against the real running
-scheduler, a real notification correctly addressed and worded); `T.21`,
-offline capability wiring, is next). Task history and the reasoning behind
+scheduler, a real notification correctly addressed and worded), and
+offline support (`T.21`: `offline: 'offline-first'`, a rewritten
+data-fetch-free bare route, `sdk.offline`-cached Trip Mode and recent
+places, and an `sdk.offline-queue`-backed check-in flow — the first real
+consumer of that write-queue primitive anywhere in the platform, live-
+verified end to end via a real queue → drain → synced-visit round trip).
+`T.22`, Slice 3 hardening & release pass, is next). Task history and the
+reasoning behind
 every completed task lives in `SPEC.md`'s `Status` section — that's the
 changelog; don't duplicate it here.
