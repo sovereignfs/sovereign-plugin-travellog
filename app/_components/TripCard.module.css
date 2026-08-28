@@ -7,6 +7,12 @@
   border: var(--sv-border-width-hairline) solid var(--sv-color-border);
   border-radius: var(--sv-radius-lg);
   background: var(--sv-color-surface-raised);
+  cursor: pointer;
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 2px;
 }
 
 /* The one visually "loud" card — a bolder border, matching the wireframe's
@@ -14,6 +20,14 @@
    No `--sv-border-width-*` token beyond `hairline` exists today, so this is
    a plain px bump on top of the token-driven colour/radius above it. */
 .cardOngoing {
+  border-color: var(--sv-color-text-primary);
+  border-width: 1.5px;
+}
+
+/* `docs/adhoc/web-trips.md` screen 3: "solid border replaces the default
+   subtle one" on selection — same treatment as `.cardOngoing` (both can
+   apply at once; the properties just agree). */
+.cardSelected {
   border-color: var(--sv-color-text-primary);
   border-width: 1.5px;
 }

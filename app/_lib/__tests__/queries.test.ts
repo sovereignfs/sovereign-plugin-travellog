@@ -4,7 +4,7 @@ import * as schema from '../../_db/schema';
 import { createTestDb, type TestDb } from '../../_db/__tests__/test-db';
 import { createPlace } from '../places';
 import { createStop } from '../stops';
-import { createTrip } from '../trips';
+import { createTrip, updateTrip } from '../trips';
 import { createVisit } from '../visits';
 import {
   getTripsOverview,
@@ -341,7 +341,15 @@ describe('listTripCards (T.13, payload 2)', () => {
       stopCount: 0,
       dayCount: 0,
       destinationSummary: null,
+      companions: [],
     });
+  });
+
+  it('carries companions on the card payload (T.14’s detail column reads this, not a second fetch)', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Reunion trip');
+    await updateTrip(t.travellog, trip.id, { companions: ['Sam', 'Alex'] });
+    const [card] = await listTripCards(t.travellog, actor);
+    expect(card?.companions).toEqual(['Sam', 'Alex']);
   });
 
   it('summarizes the destination as the first stop’s place, plus a count of the rest', async () => {

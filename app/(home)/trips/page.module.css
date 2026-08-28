@@ -1,0 +1,21 @@
+/*
+ * Same technique as `../checkins/page.module.css`: `.header` stays a fixed,
+ * non-shrinking sibling above `.body`, which hands its own scrolling off to
+ * `TripsScreen`'s `MainDetailSplit` (each of `.list`/`.detail` scrolls
+ * independently).
+ */
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.header {
+  flex-shrink: 0;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+}

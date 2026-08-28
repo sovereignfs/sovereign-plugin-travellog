@@ -1,7 +1,21 @@
+/* `T.14` moves this out from under `PageContainer` (the page root now
+   splits fixed header / independently-scrolling `MainDetailSplit` body, so
+   `TripDetailPanel` gets real column real estate — same technique as
+   `CheckinsTimeline.module.css`'s `.list`, whose comment this one mirrors)
+   — this padding manually reproduces `PageContainer`'s own default `md`
+   gutter so the grid's left edge still lines up with `PageHeader`'s title
+   above it. */
 .screen {
   display: flex;
   flex-direction: column;
   gap: var(--sv-space-6);
+  padding: var(--sv-space-2) var(--sv-space-8) var(--sv-space-8);
+}
+
+@media (max-width: 768px) {
+  .screen {
+    padding: var(--sv-space-2) var(--sv-space-4) var(--sv-space-4);
+  }
 }
 
 .header {

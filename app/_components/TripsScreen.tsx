@@ -6,7 +6,9 @@ import type { TripCard as TripCardData, TripsOverview } from '../_lib/queries';
 import type { TripStatus } from '../_lib/trip-status';
 import { compareDateKeys } from '../_lib/dates';
 import { CreateTripDialog } from './CreateTripDialog';
+import { MainDetailSplit } from './MainDetailSplit';
 import { TripCard } from './TripCard';
+import { TripDetailPanel } from './TripDetailPanel';
 import styles from './TripsScreen.module.css';
 
 type StatusFilter = 'all' | TripStatus;
@@ -43,16 +45,31 @@ function sortWithinGroup(status: TripStatus, cards: TripCardData[]): TripCardDat
 }
 
 /**
- * `T.13`'s Trips screen body — `docs/adhoc/web-trips.md` screens 1/2/4.
- * Filtering is entirely client-side over one already-fetched page (the
- * wireframe's own call: a personal trip list is small and bounded, unlike
- * check-in history). No card-click-to-detail here — that's `T.14`'s
- * "Detail column (payload 3)" deliverable, not this task's.
+ * The Trips screen body — `docs/adhoc/web-trips.md` screens 1/2/3/4 (`T.13`
+ * built 1/2/4; `T.14` adds screen 3, the click-to-detail column). Filtering
+ * is entirely client-side over one already-fetched page (the wireframe's
+ * own call: a personal trip list is small and bounded, unlike check-in
+ * history) — the same fetched `cards` array backs both the grid and the
+ * detail column, so selecting a trip needs no second round trip.
  */
-export function TripsScreen({ overview, cards }: { overview: TripsOverview; cards: TripCardData[] }) {
+export function TripsScreen({
+  overview,
+  cards: initialCards,
+}: {
+  overview: TripsOverview;
+  cards: TripCardData[];
+}) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [cards, setCards] = useState(initialCards);
+  const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
+
+  const selectedTrip = selectedTripId ? (cards.find((c) => c.id === selectedTripId) ?? null) : null;
+
+  function handleCompanionsChange(tripId: string, companions: string[]): void {
+    setCards((prev) => prev.map((c) => (c.id === tripId ? { ...c, companions } : c)));
+  }
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -93,86 +110,109 @@ export function TripsScreen({ overview, cards }: { overview: TripsOverview; card
     );
   }
 
+  function selectTrip(id: string): void {
+    setSelectedTripId((prev) => (prev === id ? null : id));
+  }
+
   return (
-    <div className={styles.screen}>
-      <div className={styles.header}>
-        <Button onClick={() => setCreateOpen(true)}>New trip</Button>
-      </div>
+    <>
+      <MainDetailSplit
+        list={
+          <div className={styles.screen}>
+            <div className={styles.header}>
+              <Button onClick={() => setCreateOpen(true)}>New trip</Button>
+            </div>
 
-      <div className={styles.overview}>
-        <div className={styles.tile}>
-          <span className={styles.tileValue}>{totalTrips}</span>
-          <span className={styles.tileLabel}>trips</span>
-        </div>
-        <div className={styles.tile}>
-          <span className={styles.tileValue}>{overview.uniquePlaceCount}</span>
-          <span className={styles.tileLabel}>places visited</span>
-        </div>
-        <div className={styles.tile}>
-          <span className={styles.tileValue}>{overview.uniqueCountryCount}</span>
-          <span className={styles.tileLabel}>countries visited</span>
-        </div>
-        <div className={styles.tile}>
-          <span className={styles.tileValue}>{overview.totalCheckins}</span>
-          <span className={styles.tileLabel}>check-ins</span>
-        </div>
-        {overview.nextTrip && (
-          <div className={[styles.tile, styles.tileNext].join(' ')}>
-            <span className={styles.tileNextLabel}>Next trip</span>
-            <span className={styles.tileLabel}>
-              {overview.nextTrip.name} in {overview.nextTrip.daysUntil}{' '}
-              day{overview.nextTrip.daysUntil === 1 ? '' : 's'}
-            </span>
-          </div>
-        )}
-      </div>
-
-      <div className={styles.filters}>
-        <div className={styles.chips} role="radiogroup" aria-label="Filter by status">
-          {STATUS_CHIPS.map((chip) => (
-            <button
-              key={chip.value}
-              type="button"
-              role="radio"
-              aria-checked={statusFilter === chip.value}
-              className={[styles.chip, statusFilter === chip.value ? styles.chipActive : ''].join(' ')}
-              onClick={() => setStatusFilter(chip.value)}
-            >
-              {chip.label}
-            </button>
-          ))}
-        </div>
-        <Input
-          type="search"
-          placeholder="Search trips…"
-          aria-label="Search trips"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className={styles.search}
-        />
-      </div>
-
-      {groups.length === 0 ? (
-        <p className={styles.noMatches}>No trips match your filters.</p>
-      ) : (
-        <div className={styles.groups}>
-          {groups.map((group) => (
-            <div key={group.status}>
-              <div className={styles.groupHeader}>
-                <span>{STATUS_GROUP_LABEL[group.status]}</span>
-                <span className={styles.groupCount}>{group.cards.length}</span>
+            <div className={styles.overview}>
+              <div className={styles.tile}>
+                <span className={styles.tileValue}>{totalTrips}</span>
+                <span className={styles.tileLabel}>trips</span>
               </div>
-              <div className={styles.cardGrid}>
-                {group.cards.map((card) => (
-                  <TripCard key={card.id} trip={card} />
+              <div className={styles.tile}>
+                <span className={styles.tileValue}>{overview.uniquePlaceCount}</span>
+                <span className={styles.tileLabel}>places visited</span>
+              </div>
+              <div className={styles.tile}>
+                <span className={styles.tileValue}>{overview.uniqueCountryCount}</span>
+                <span className={styles.tileLabel}>countries visited</span>
+              </div>
+              <div className={styles.tile}>
+                <span className={styles.tileValue}>{overview.totalCheckins}</span>
+                <span className={styles.tileLabel}>check-ins</span>
+              </div>
+              {overview.nextTrip && (
+                <div className={[styles.tile, styles.tileNext].join(' ')}>
+                  <span className={styles.tileNextLabel}>Next trip</span>
+                  <span className={styles.tileLabel}>
+                    {overview.nextTrip.name} in {overview.nextTrip.daysUntil}{' '}
+                    day{overview.nextTrip.daysUntil === 1 ? '' : 's'}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <div className={styles.filters}>
+              <div className={styles.chips} role="radiogroup" aria-label="Filter by status">
+                {STATUS_CHIPS.map((chip) => (
+                  <button
+                    key={chip.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={statusFilter === chip.value}
+                    className={[styles.chip, statusFilter === chip.value ? styles.chipActive : ''].join(' ')}
+                    onClick={() => setStatusFilter(chip.value)}
+                  >
+                    {chip.label}
+                  </button>
                 ))}
               </div>
+              <Input
+                type="search"
+                placeholder="Search trips…"
+                aria-label="Search trips"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className={styles.search}
+              />
             </div>
-          ))}
-        </div>
-      )}
 
+            {groups.length === 0 ? (
+              <p className={styles.noMatches}>No trips match your filters.</p>
+            ) : (
+              <div className={styles.groups}>
+                {groups.map((group) => (
+                  <div key={group.status}>
+                    <div className={styles.groupHeader}>
+                      <span>{STATUS_GROUP_LABEL[group.status]}</span>
+                      <span className={styles.groupCount}>{group.cards.length}</span>
+                    </div>
+                    <div className={styles.cardGrid}>
+                      {group.cards.map((card) => (
+                        <TripCard
+                          key={card.id}
+                          trip={card}
+                          selected={card.id === selectedTripId}
+                          onSelect={selectTrip}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        }
+        detail={
+          selectedTrip ? (
+            <TripDetailPanel
+              trip={selectedTrip}
+              onClose={() => setSelectedTripId(null)}
+              onCompanionsChange={handleCompanionsChange}
+            />
+          ) : null
+        }
+      />
       <CreateTripDialog open={createOpen} onClose={() => setCreateOpen(false)} />
-    </div>
+    </>
   );
 }

@@ -315,6 +315,13 @@ export interface TripCard {
   dayCount: number;
   /** First stop's place name, plus a count of any additional stops (e.g. "Lisbon +2") — null for a trip with no stops yet. */
   destinationSummary: string | null;
+  /**
+   * Lightweight, informational tags (`schema.ts`'s header comment — no real
+   * `travellog_trip_members` table). Carried on the card payload, not just
+   * fetched separately for the detail column, so `T.14`'s `TripDetailPanel`
+   * needs no second round trip for data this same query already touches.
+   */
+  companions: string[];
 }
 
 /**
@@ -326,7 +333,13 @@ export interface TripCard {
  */
 export async function listTripCards(db: TravellogDb, actor: Actor): Promise<TripCard[]> {
   const trips = await db
-    .select({ id: schema.trips.id, name: schema.trips.name, startDate: schema.trips.startDate, endDate: schema.trips.endDate })
+    .select({
+      id: schema.trips.id,
+      name: schema.trips.name,
+      startDate: schema.trips.startDate,
+      endDate: schema.trips.endDate,
+      companions: schema.trips.companions,
+    })
     .from(schema.trips)
     .where(and(eq(schema.trips.ownerId, actor.userId), eq(schema.trips.tenantId, actor.tenantId)));
 
@@ -377,6 +390,7 @@ export async function listTripCards(db: TravellogDb, actor: Actor): Promise<Trip
           ? `${first.placeName} +${String(stops.length - 1)}`
           : first.placeName
         : null,
+      companions: trip.companions ? (JSON.parse(trip.companions) as string[]) : [],
     };
   });
 }

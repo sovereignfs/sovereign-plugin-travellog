@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "fs.sovereign.travellog",
   "name": "Travellog",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "A private, self-hosted trip planner and personal place check-in log.",
   "type": "sovereign",
   "runtime": "native",

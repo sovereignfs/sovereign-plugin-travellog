@@ -7,11 +7,115 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.13` shipped, manifest at `0.15.0` (`T.5a`, slot
-`0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block `T.6`–`T.13`).
+🚧 In progress — `T.1`–`T.14` shipped, manifest at `0.16.0` (`T.5a`, slot
+`0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block `T.6`–`T.14`).
 Slice 1 (web) is feature-complete; Slice 2's data model, server layer,
-auto-link engine, and now Trips screen all exist. `T.14` (trip detail panel
-& sharing) is next.
+auto-link engine, and now the full Trips screen (overview, cards, and
+click-to-detail) all exist. `T.15` (Planner: trip picker & stop workspace)
+is next.
+
+**`T.14` — Trips screen: trip detail panel & sharing (`0.16.0`).** The
+click-to-detail column from `docs/adhoc/web-trips.md` screen 3 — status,
+dates/stops/days meta, an editable companions field, and an "Open in
+Planner" link. Screen 5 (the real member-sharing dialog) was never built:
+`schema.ts`'s own header comment records that `T.10` shipped with
+`travellog_trip_members` unbuilt (`CONCEPT.md`'s open question 2 was still
+unresolved at the time, and the task's conditional scope says to substitute
+a plain field in that case) — this task is what actually consumes that
+fallback. Confirmed against three independent sources before writing any
+code (`SPEC.md`'s own task text, the wireframe's "Open questions" section,
+and `schema.ts`'s comment) that this is a real, already-decided fork, not
+an open call this task needed to make itself.
+
+Built: `TripDetailPanel.tsx` + `.module.css` (new); `TripCard.tsx` extended
+with `selected`/`onSelect` props and click handling; `TripsScreen.tsx`
+wired to `MainDetailSplit` (the plugin-local list+detail component `T.6`
+built specifically anticipating this reuse) with `selectedTripId` state; a
+new `app/(home)/trips/page.module.css` splitting the page into a fixed
+`PageHeader` and an independently-scrolling body, mirroring
+`checkins/page.module.css`'s established technique exactly, so the detail
+column gets real column real estate instead of scrolling the page title
+along with it; `_lib/queries.ts`'s `TripCard`/`listTripCards` extended with
+a `companions: string[]` field, parsed from the same `trips` row this query
+already fetches — no second round trip for the detail column's own data,
+same "don't add a fetch for data already in hand" call `T.13` made for its
+card grid.
+
+**No new server action.** `updateTripAction(tripId, patch)` already existed
+from `T.11` and already accepted a `companions` patch — `actions.ts`'s own
+header comment on the Trips section states outright that `trips.companions`
+is "edited through `updateTripAction` like any other." This task's only
+server-layer change is the `listTripCards` field addition above; the
+mutation path needed nothing new.
+
+**Three real design decisions, not just wiring:**
+
+- **The companions field is genuinely editable** (`TagInput`, committing on
+  Enter/comma and via `TagInput`'s own built-in blur-commit), not the
+  read-only display the wireframe's literal wording ("a plain,
+  non-interactive text field") first suggested. Resolved in favor of
+  editable by weighing the wireframe's phrasing against two more concrete,
+  more authoritative signals pointing the other way: SPEC.md's own T.14
+  deliverable text calls it "a plain free-text field... no access-control
+  implications" (a form field, not a label), and `actions.ts`'s existing
+  comment already asserts it *is* edited through `updateTripAction`. An
+  editable field with no edit surface anywhere in the product would leave
+  `updateTripAction`'s `companions` patch permanently unreachable from the
+  UI — the wireframe's "non-interactive" almost certainly meant "not backed
+  by `sdk.directory`/access control," not "read-only," a needed
+  clarification.
+- **The Completed card's CTA ("View trip") changes from `disabled` to a
+  real action** — opening this same detail column, not routing to
+  Planner like every other status. `T.13`'s own code comment on that button
+  read "Coming in T.14," but this task's actual deliverables never
+  mention a full trip page (the wireframe defers that separately, and it
+  has no task slot yet) — so "the destination `T.14` was waiting to build"
+  turned out to be the detail column, not a page. Re-using Planner for a
+  completed trip's CTA would have been the easy default but a worse fit:
+  Planner is a stop-*editing* workspace ("Continue planning"/"View
+  itinerary" fit the in-progress statuses); the detail column's read-mostly
+  meta view is the closer match for "look at a trip that's already over."
+- **Optimistic local update with rollback on `updateTripAction` failure**,
+  not a refetch-after-save. `TripsScreen`'s `cards` state updates
+  immediately when a companion is added/removed (so the `TripCard` grid and
+  a later re-open both stay in sync without a second query), and
+  `TripDetailPanel` reverts to the pre-edit value via the same setter if
+  the server call comes back `{ ok: false }` — surfaced with a toast,
+  matching `CheckinDetailPanel`'s existing Unlink error-handling shape
+  exactly (`sv-ui-design`'s "expected failures never throw, render inline"
+  convention, extended to a toast since this field has no dedicated error
+  slot of its own).
+
+**Live-verified end to end, including a real automation-tooling gotcha
+worth recording so it isn't re-diagnosed as a code bug next time:** raw
+pixel-coordinate clicks in the Browser pane tool intermittently landed on
+the right element by accessibility-tree inspection (`document.elementFromPoint`
+confirmed the click target was the correct `div[role="button"]`, nested
+correctly under `.cardGrid`/`.screen`) but did not always trigger React's
+click handling, while `ref`-targeted clicks and a directly-dispatched
+`element.click()` both worked reliably. Diagnosed by comparing
+`elementFromPoint` output against the expected DOM chain before touching
+any component code — ruled out a selection/`stopPropagation` bug in
+`TripCard.tsx` before it was ever suspected. Verified with that reliable
+click path: clicking a card's body opens the detail column with the
+correct trip's data and a solid selected border; the same click again (or
+the panel's own close button) closes it; the "Continue planning" CTA still
+navigates straight to Planner without also opening the detail column
+(`stopPropagation` confirmed); adding "Sam" via the companions `TagInput`
+committed on blur (Enter didn't reliably commit through the automation
+tool, but `TagInput`'s own blur-commit — the exact mechanism
+`useCommitOnEnterOrBlur`-style inputs exist for — covered it), persisted
+through a full page reload, and round-tripped correctly through
+`updateTripAction` into the database; a seeded `completed`-status trip's
+"View trip" CTA opened the same detail column instead of staying disabled.
+Fresh-tab console checked clean throughout. The seeded completed trip was
+deleted afterward; the real "Sam" companion added through the actual UI
+flow was left in place, matching how `T.13`'s own UI-created "Kyoto &
+Osaka" trip was left rather than scrubbed.
+
+Full check suite clean: `format:check`, `lint`, this package's `typecheck`,
+`design:tokens:check`, and all 279 travellog tests (278 existing + 1 new,
+covering `listTripCards` carrying `companions` on the card payload) pass.
 
 **`T.13` — Trips screen (web): overview & cards (`0.15.0`).** The
 browse/manage hub from `docs/adhoc/web-trips.md` screens 1, 2, and 4 — an

@@ -50,16 +50,43 @@ function metaLine(trip: TripCardData): string {
  * section); web has no Trip Mode to open yet, so this is the closest real
  * destination until `T.15`/`T.16` ship.
  *
- * Clicking the card body itself (not the CTA) is deliberately **not**
- * wired to anything — that opens the detail column per CONCEPT.md, which
- * is `T.14`'s deliverable, not this one's.
+ * Clicking the card body opens `T.14`'s detail column (`onSelect`) — the
+ * CTA button is a nested, independently-clickable control, so its own click
+ * handler stops propagation rather than also selecting the card underneath
+ * it. Completed's CTA ("View trip") also just opens the detail column: the
+ * full single-page trip view it more literally implies stays deferred
+ * (CONCEPT.md), and the detail column is the closest real destination that
+ * exists now — no longer `disabled`, since `T.14` (this task) is what its
+ * old "Coming in T.14" placeholder was waiting for.
  */
-export function TripCard({ trip }: { trip: TripCardData }) {
+export function TripCard({
+  trip,
+  selected,
+  onSelect,
+}: {
+  trip: TripCardData;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) {
   const router = useRouter();
   const isOngoing = trip.status === 'ongoing';
 
   return (
-    <div className={[styles.card, isOngoing ? styles.cardOngoing : ''].filter(Boolean).join(' ')}>
+    <div
+      className={[styles.card, isOngoing ? styles.cardOngoing : '', selected ? styles.cardSelected : '']
+        .filter(Boolean)
+        .join(' ')}
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      onClick={() => onSelect(trip.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(trip.id);
+        }
+      }}
+    >
       {/* Plain `mono` for every status, including Ongoing — the design
           system is deliberately monochrome (CLAUDE.md), and `Badge` has no
           "inverted/filled" variant to match the wireframe's illustrative
@@ -72,7 +99,15 @@ export function TripCard({ trip }: { trip: TripCardData }) {
       <h3 className={styles.name}>{trip.name}</h3>
       <p className={styles.meta}>{metaLine(trip)}</p>
       {trip.status === 'completed' ? (
-        <Button variant="ghost" size="sm" disabled className={styles.cta} title="Coming in T.14">
+        <Button
+          variant="ghost"
+          size="sm"
+          className={styles.cta}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect(trip.id);
+          }}
+        >
           {CTA_LABEL[trip.status]} →
         </Button>
       ) : (
@@ -80,7 +115,10 @@ export function TripCard({ trip }: { trip: TripCardData }) {
           variant={isOngoing ? 'primary' : 'ghost'}
           size="sm"
           className={styles.cta}
-          onClick={() => router.push(`/travellog/planner/${trip.id}`)}
+          onClick={(e) => {
+            e.stopPropagation();
+            router.push(`/travellog/planner/${trip.id}`);
+          }}
         >
           {CTA_LABEL[trip.status]} →
         </Button>
