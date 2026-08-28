@@ -7,12 +7,74 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.17` shipped, manifest at `0.19.0` (`T.5a`, slot
+🚧 In progress — `T.1`–`T.18` shipped, manifest at `0.20.0` (`T.5a`, slot
 `0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block
-`T.6`–`T.17`). Slice 1 (web) is feature-complete; Slice 2 (web) is now
-ship-ready per its own review checklist — data model, server layer,
-auto-link engine, Trips, and the whole Planner all exist and were audited
-live against `CONCEPT.md`.
+`T.6`–`T.18`). Slice 1 (web) is feature-complete; Slice 2 (web) is
+ship-ready; Slice 3 (Trip Mode) now has its data/logic layer — `T.19`
+(the actual mobile screen) is next.
+
+**`T.18` — Trip Mode data & logic (`0.20.0`).** The server-side "what does
+today look like right now" query — `resolveTripModeToday` (new
+`_lib/trip-mode.ts`), given a stop, the caller's current UTC instant, and
+its own IANA zone: resolves which `trip_day` is "today" *in that zone*,
+returns its itinerary items in position order, and picks `nextItem` — the
+first item by position with a `plannedTime` strictly after now (equal to
+now counts as already arrived, not next) — plus a whole-minutes
+`countdownMinutes` to it. Deliberately scoped to a single stop's single
+day: no cross-day or cross-stop lookahead once today's items run out
+(`nextItem` is `null`, not tomorrow's first item), no proximity/routing
+resequencing (`CONCEPT.md`'s "Future (deferred)") — resolves the plan
+exactly as manually ordered, same principle `T.16`'s day list already
+established for display.
+
+**Pure function, explicit `(nowUtcMs, tzIana)` parameters — not
+`Date.now()` or a request header — because `T.20` (the "your next stop is
+in 20 minutes" notification) calls this same function from an
+`sdk.schedules` background handler**, which has no request to read a
+timezone header from and no meaningful "server now": the traveler's own
+local instant is the only one that means anything here. Matches
+`_lib/timezone.ts`'s own header comment ("every visit's timezone is
+client-supplied, never guessed server-side") — extended from a one-time
+capture at check-in to a live, repeatedly-called resolver.
+
+**New timezone primitive: `localTimeOfDay`** (`_lib/timezone.ts`), a UTC
+instant's local wall-clock time as zero-padded 24-hour `"HH:mm"` — directly
+comparable against `itineraryItems.plannedTime`'s own `"HH:mm"` shape via
+plain string comparison, the same "lexicographic order on zero-padded keys
+is chronological order" convention `_lib/dates.ts`'s `compareDateKeys`
+already names for date keys. Deliberately a sibling of the existing
+`localDateKey`/`formatLocalTime`, not a replacement — `localTimeOfDay`
+alone never tells you *which* day an instant falls on (a time-of-day can
+roll past midnight into the next local day), so `resolveTripModeToday`
+always calls `localDateKey` first to settle that, then `localTimeOfDay`
+only to compare within the day already chosen.
+
+**Full review-checklist coverage, both edge cases live-tested via real
+`Intl` zone conversions, not hand-rolled offset math:** a date-line
+crossing (a stop dated `2026-06-15` resolves correctly from a
+`2026-06-14T22:00:00Z` instant in `Pacific/Kiritimati`, UTC+14 — the local
+calendar date is a full day ahead of UTC's) and the exact local midnight
+boundary (`Europe/Lisbon`, UTC+1 in June: `22:59Z`/`23:59` local resolves
+to one `trip_day`, `23:01Z`/`00:01` local two minutes later resolves to
+the *next* `trip_day` — confirmed as two genuinely different row ids, not
+just a date-string assertion). Also covered: a real day with zero
+itinerary items is a populated empty state (`items: []`, `nextItem: null`)
+distinct from "no day at all" (`null`, when today falls outside the stop's
+range) — `T.18`'s own deliverable calls this out explicitly, so both paths
+get their own test rather than assuming one implies the other; an
+un-timed item is included in `items` (position order) but can never become
+`nextItem`; scoping to the given `stopId` only, confirmed by asserting a
+second stop's day never resolves when queried against the first. 9 new
+tests in `trip-mode.test.ts`, 3 more in `timezone.test.ts` for
+`localTimeOfDay` directly (zero-padding, zone offset, lexicographic
+ordering) — 12 new, 308 total, all passing.
+
+No live browser verification this task — pure server-side data/logic with
+no route or UI of its own (`T.19` builds the screen that will actually call
+this); nothing observable in a preview to drive.
+
+Full check suite clean: `format:check`, `lint`, this package's `typecheck`,
+`design:tokens:check`, and all 308 travellog tests pass.
 
 **`T.17` — Slice 2 hardening & polish pass (web) (`0.19.0`).** A full live
 pass against `CONCEPT.md`'s Slice 2 + Web UI (Trips/Planner) sections,

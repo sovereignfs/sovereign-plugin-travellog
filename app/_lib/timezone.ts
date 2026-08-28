@@ -54,3 +54,30 @@ export function formatLocalTime(utcMs: number, tzIana: string): string {
   }
   return formatter.format(new Date(utcMs));
 }
+
+const timeOfDayFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * The local 24-hour wall-clock time (`"14:40"`) a UTC instant reads as in
+ * the given zone — `T.18`'s Trip Mode resolver compares this directly
+ * against `itineraryItems.plannedTime` (same `"HH:mm"` shape, so a plain
+ * string comparison is a correct chronological comparison within a single
+ * calendar day, same "lexicographic order on zero-padded keys is
+ * chronological order" convention `_lib/dates.ts`'s `compareDateKeys` names
+ * for date keys). Never used across a day boundary — `localDateKey` is what
+ * decides *which* day "now" falls on first.
+ */
+export function localTimeOfDay(utcMs: number, tzIana: string): string {
+  let formatter = timeOfDayFormatterCache.get(tzIana);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tzIana,
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    });
+    timeOfDayFormatterCache.set(tzIana, formatter);
+  }
+  // en-GB + hourCycle: 'h23' formats as zero-padded 24-hour "HH:mm" directly.
+  return formatter.format(new Date(utcMs));
+}
