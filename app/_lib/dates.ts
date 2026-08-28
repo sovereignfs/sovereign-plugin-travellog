@@ -123,3 +123,13 @@ export function formatDateRange(startKey: string, endKey: string): string {
   if (sameYear) return `${monthDay(start)} – ${monthDay(end)}`;
   return `${monthDayYear(start)} – ${monthDayYear(end)}`;
 }
+
+/** `T.16`'s day-group heading, e.g. `"Tue, Aug 26"` — UTC-noon anchored for the same reason every other function here is (see file header). */
+export function formatDayHeading(dateKey: string): string {
+  return toUtcNoon(dateKey).toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}

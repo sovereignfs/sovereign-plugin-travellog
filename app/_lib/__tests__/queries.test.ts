@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../_db/schema';
 import { createTestDb, type TestDb } from '../../_db/__tests__/test-db';
 import { addDaysToDateKey, todayDateKey } from '../dates';
+import { createItineraryItem } from '../itinerary-items';
 import { createPlace } from '../places';
-import { createStop } from '../stops';
+import { createStop, listTripDays } from '../stops';
 import { createTrip, updateTrip } from '../trips';
 import { createVisit } from '../visits';
 import {
@@ -13,6 +14,7 @@ import {
   getVisitTimelinePage,
   listTripCards,
   listTripsForPicker,
+  listWorkspaceDays,
   listWorkspaceStops,
   VISIT_TIMELINE_PAGE_SIZE,
 } from '../queries';
@@ -472,5 +474,66 @@ describe('listWorkspaceStops (T.15, payload 7)', () => {
     const trip = await createTrip(t.travellog, otherActor, 'Not mine');
     await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
     expect(await listWorkspaceStops(t.travellog, actor, trip.id)).toEqual([]);
+  });
+});
+
+describe('listWorkspaceDays (T.16, payload 7’s day list)', () => {
+  it('returns an empty array for a trip with no stops', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Someday trip');
+    expect(await listWorkspaceDays(t.travellog, actor, trip.id)).toEqual([]);
+  });
+
+  it('returns one day per date in a stop’s range, empty of items, in date order', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
+    const stop = await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-12',
+    });
+
+    const days = await listWorkspaceDays(t.travellog, actor, trip.id);
+    expect(days.map((d) => d.date)).toEqual(['2026-06-10', '2026-06-11', '2026-06-12']);
+    expect(days.every((d) => d.stopId === stop.id)).toBe(true);
+    expect(days.every((d) => d.items.length === 0)).toBe(true);
+  });
+
+  it('nests itinerary items in position order, with place names for place-backed items', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
+    const stop = await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-10',
+    });
+    const [day] = await listTripDays(t.travellog, stop.id);
+    if (!day) throw new Error('expected a trip day');
+
+    await createItineraryItem(t.travellog, day.id, trip.id, { title: 'Free time' });
+    await createItineraryItem(t.travellog, day.id, trip.id, {
+      placeId,
+      plannedTime: '09:00',
+      isFixed: true,
+      notes: 'Bring water',
+    });
+
+    const days = await listWorkspaceDays(t.travellog, actor, trip.id);
+    expect(days).toHaveLength(1);
+    const [resultDay] = days;
+    if (!resultDay) throw new Error('expected a day');
+    expect(resultDay.items).toHaveLength(2);
+    expect(resultDay.items[0]).toMatchObject({ title: 'Free time', placeId: null, placeName: null });
+    expect(resultDay.items[1]).toMatchObject({
+      placeId,
+      placeName: 'Belém Tower',
+      plannedTime: '09:00',
+      isFixed: true,
+      notes: 'Bring water',
+    });
+  });
+
+  it('another user’s trip never appears, even by a guessed tripId', async () => {
+    const otherActor = { tenantId: 'tenant-1', userId: 'user-2' };
+    const trip = await createTrip(t.travellog, otherActor, 'Not mine');
+    await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    expect(await listWorkspaceDays(t.travellog, actor, trip.id)).toEqual([]);
   });
 });

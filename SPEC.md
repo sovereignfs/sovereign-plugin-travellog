@@ -7,12 +7,108 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.15` shipped, manifest at `0.17.0` (`T.5a`, slot
+🚧 In progress — `T.1`–`T.16` shipped, manifest at `0.18.0` (`T.5a`, slot
 `0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block
-`T.6`–`T.15`). Slice 1 (web) is feature-complete; Slice 2's data model,
-server layer, auto-link engine, Trips screen, and now Planner's trip picker
-and stop workspace shell all exist. `T.16` (Planner: day-by-day itinerary
-editor) is next.
+`T.6`–`T.16`). Slice 1 (web) is feature-complete; Slice 2's data model,
+server layer, auto-link engine, Trips screen, and now the whole Planner
+(trip picker, stop workspace, day-by-day itinerary editor) all exist.
+
+**`T.16` — Planner: day-by-day itinerary editor (`0.18.0`).**
+`docs/adhoc/web-planner.md` screens 2 (the populated day-by-day list) and 5
+(the itinerary-item detail column) — the two screens `T.15` deliberately
+left unbuilt. `T.15`'s own `PlannerStopStrip` selection state (`activeStopId`)
+is the only input; no new navigation.
+
+**Data layer:** one new query, `listWorkspaceDays` (`_lib/queries.ts`),
+fetches every day across the *whole trip* — not just the selected stop — in
+two queries total (days, then their items with a `LEFT JOIN` on `places` for
+place-backed items' name/category), same "small and bounded, fetch it all"
+call `listTripCards`/`listWorkspaceStops` already made for this plugin's
+other personal, non-paginated lists. This is deliberate, not just convenient:
+`T.16`'s own review checklist requires switching the selected stop to swap
+the day list "with no stale data flash," and fetching per-stop on every
+switch would mean either a loading flash or a stale-until-refetch window.
+With everything already in memory, `PlannerWorkspace` filters
+`days.filter(d => d.stopId === activeStopId)` client-side — switching stops
+is synchronous, zero network round trips, zero flash risk by construction.
+
+**State ownership, mirroring `T.14`'s `TripsScreen`/`TripDetailPanel`
+split exactly:** `PlannerWorkspace` now owns `days` (copied into local state,
+unlike `stops` which stays a direct prop — see below) and `selectedItemId`;
+`PlannerItemDetailPanel`'s field edits bubble a `patch` up via `onChange`
+rather than calling `router.refresh()`, keeping the day list and the open
+detail panel in sync from one state update, the same pattern
+`TripDetailPanel`'s companions field already established for its own
+list+detail split (`MainDetailSplit`, reused here — its own doc comment
+already named `T.16`'s item detail as a planned second consumer, alongside
+`T.14`'s trip detail). `days` *is* copied into local state (`stops` isn't)
+because `_lib/itinerary-items.ts`'s own header comment says mutating an item
+never touches anything else on the page — no denormalized trip dates to
+resync, unlike a stop mutation, so there's nothing a `router.refresh()`
+would need to catch that local state doesn't already have.
+
+**New components:** `PlannerDayList` (day headings + item rows, one
+`DndContext` **per day** rather than one shared across the list — scopes
+dnd-kit's collision detection so a drag can never land in a different day,
+satisfying "reorder within a day writes exactly one row per drop" by
+construction rather than a runtime check) and `PlannerItemDetailPanel`
+(screen 5: place read-only summary, planned time, the Fixed toggle, notes,
+remove). `AddItineraryItemDialog` reuses the exact place-search flow
+`AddStopDialog` established in `T.15` (same `searchPlacesAction`/
+`createPlaceAction`/`SuggestionInput` pattern), but adds a second path that
+dialog didn't need: `SuggestionInput`'s existing `onCreate`/`createLabel`
+affordance is repurposed so "add without a place" commits a **title-only**
+item (`placeId: null`) rather than creating a manual place record — matching
+`itinerary-items.ts`'s schema comment that a title-only item is legal, and
+avoiding a spurious `places` row for something like "Free time" that was
+never a real place. No dedicated wireframe screen for this dialog exists
+(`web-planner.md`'s Phasing section only wireframed screens 2/5 for `T.16`)
+— it's an original small dialog built by extending the established
+place-search pattern, not by inventing new UI language.
+
+**Real bug caught and fixed before it shipped: fixed-but-untimed is a real
+reachable state, not just a schema edge case.** `itinerary-items.ts`'s
+`updateItineraryItem` validates the *merged* result (existing row + patch),
+so clearing `plannedTime` on an already-`isFixed` item throws server-side
+("Only a timed item can be marked fixed") — reachable the moment a user
+clears the Planned time field on a fixed item, not a contrived case.
+`PlannerItemDetailPanel`'s `commitPlannedTime` now detects this in the same
+patch (`next === null && item.isFixed` → also send `isFixed: false`) so
+clearing the time silently un-fixes the item instead of surfacing a
+confusing error for an action the user didn't take directly. Caught by
+reasoning through the merge-validation logic while writing the detail panel,
+confirmed live (see below) before considering the task done.
+
+**Live verification, including the two tooling caveats already documented in
+`T.15`'s own status entry (both held again here):** `SuggestionInput`'s
+popover only opens on a real `focus` event (`focused` state, not just a
+`value` change) — a synthetic `input` event alone leaves it closed even
+though the debounced fetch still resolves; dispatching `.focus()` first
+fixed it. dnd-kit's keyboard sensor needed real `KeyboardEvent`s dispatched
+via `javascript_exec` (`code: 'Space'`/`'ArrowDown'`, not the `computer`
+tool's key action, which never registered a pickup per dnd-kit's own
+`DndLiveRegion` announcements staying empty) — once switched, pickup →
+move → drop worked and was confirmed to persist across a full page reload,
+not just optimistically in the DOM. Verified end-to-end: add a place-backed
+activity (search → select → detail column opens automatically) and a
+title-only one (search → "Add … without a place"); set a planned time,
+confirm the Fixed toggle enables only after that commits (not on every
+keystroke) and a "Fixed" badge appears on the row immediately, no refresh;
+drag-reorder two items within a day via the keyboard sensor, confirmed
+persisted after reload; clear the time on a fixed item, confirm it silently
+un-fixes (the bug above); remove an item via the confirm dialog. A stray
+console pass in the same browser tab surfaced a hydration-mismatch warning
+and a `loading.module.css` module-not-found error; both were confirmed stale
+— a completely fresh tab against the same URL showed zero console errors —
+consistent with this session's own documented finding that
+`read_console_messages` can return stale/buffered entries across reloads,
+not a real regression from this task's changes.
+
+**Design System Gap Check: no gap.** `Toggle`, `Badge`, `Input`
+(`type="time"` — a native attribute passthrough, not a new component),
+`Textarea`, `OverlayHeader`, `ConfirmDialog`, `FormField` all already exist
+and were used as-is; `MainDetailSplit` (plugin-local, not DS, per its own
+doc comment) was extended to a third consumer exactly as already planned.
 
 **`T.15` — Planner: trip picker & stop workspace (`0.17.0`).**
 `docs/adhoc/web-planner.md` screens 1 (picker), 3 (no-stops-yet workspace),

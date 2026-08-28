@@ -1,0 +1,54 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-4);
+}
+
+.feedbackError {
+  margin: 0;
+  padding: var(--sv-space-2) var(--sv-space-3);
+  border-radius: var(--sv-radius-md);
+  background: var(--sv-color-surface-sunken);
+  color: var(--sv-color-error-text);
+  font-size: var(--sv-font-size-sm);
+}
+
+.selectedSummary {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-3);
+  padding: var(--sv-space-2) var(--sv-space-3);
+  border: var(--sv-border-width-hairline) solid var(--sv-color-border);
+  border-radius: var(--sv-radius-md);
+}
+
+.selectedSummaryMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.selectedSummaryName {
+  font-size: var(--sv-font-size-md);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+}
+
+.selectedSummaryMeta {
+  font-size: var(--sv-font-size-xs);
+  color: var(--sv-color-text-muted);
+}
+
+.changeButton {
+  all: unset;
+  cursor: pointer;
+  font-size: var(--sv-font-size-xs);
+  color: var(--sv-color-text-muted);
+  text-decoration: underline;
+  flex-shrink: 0;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sv-space-2);
+}

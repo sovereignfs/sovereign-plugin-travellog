@@ -492,3 +492,96 @@ export async function listWorkspaceStops(
     .orderBy(asc(schema.stops.position));
   return rows;
 }
+
+// ---------------------------------------------------------------------------
+// Planner day-by-day itinerary (T.16, payload 7's day list)
+
+export interface WorkspaceItineraryItem {
+  id: string;
+  tripDayId: string;
+  placeId: string | null;
+  placeName: string | null;
+  placeCategory: string | null;
+  title: string | null;
+  plannedTime: string | null;
+  isFixed: boolean;
+  notes: string | null;
+  position: number;
+}
+
+export interface WorkspaceDay {
+  id: string;
+  stopId: string;
+  date: string;
+  items: WorkspaceItineraryItem[];
+}
+
+/**
+ * Every day (across every stop) for a whole trip, each with its itinerary
+ * items already nested in position order — fetched trip-wide, not per stop,
+ * so switching the selected stop in `PlannerStopStrip` is a client-side
+ * filter over data already in hand, never a second round trip (`T.16`'s own
+ * review checklist: "no stale data flash" on switch). Same "small and
+ * bounded, fetch it all" call `listTripCards`/`listWorkspaceStops` already
+ * made for this plugin's other personal, non-paginated lists. Two queries
+ * total regardless of day/item count — never N+1 per day.
+ */
+export async function listWorkspaceDays(
+  db: TravellogDb,
+  actor: Actor,
+  tripId: string,
+): Promise<WorkspaceDay[]> {
+  const days = await db
+    .select({ id: schema.tripDays.id, stopId: schema.tripDays.stopId, date: schema.tripDays.date })
+    .from(schema.tripDays)
+    .innerJoin(schema.trips, eq(schema.trips.id, schema.tripDays.tripId))
+    .where(
+      and(
+        eq(schema.tripDays.tripId, tripId),
+        eq(schema.trips.ownerId, actor.userId),
+        eq(schema.trips.tenantId, actor.tenantId),
+      ),
+    )
+    .orderBy(asc(schema.tripDays.date));
+
+  if (days.length === 0) return [];
+  const dayIds = days.map((d) => d.id);
+
+  const itemRows = await db
+    .select({
+      id: schema.itineraryItems.id,
+      tripDayId: schema.itineraryItems.tripDayId,
+      placeId: schema.itineraryItems.placeId,
+      placeName: schema.places.name,
+      placeCategory: schema.places.category,
+      title: schema.itineraryItems.title,
+      plannedTime: schema.itineraryItems.plannedTime,
+      isFixed: schema.itineraryItems.isFixed,
+      notes: schema.itineraryItems.notes,
+      position: schema.itineraryItems.position,
+    })
+    .from(schema.itineraryItems)
+    .leftJoin(schema.places, eq(schema.places.id, schema.itineraryItems.placeId))
+    .where(inArray(schema.itineraryItems.tripDayId, dayIds))
+    .orderBy(asc(schema.itineraryItems.position));
+
+  const itemsByDay = new Map<string, WorkspaceItineraryItem[]>();
+  for (const row of itemRows) {
+    const list = itemsByDay.get(row.tripDayId) ?? [];
+    list.push({
+      id: row.id,
+      tripDayId: row.tripDayId,
+      placeId: row.placeId,
+      placeName: row.placeName,
+      placeCategory: row.placeCategory,
+      title: row.title,
+      plannedTime: row.plannedTime,
+      isFixed: row.isFixed === 1,
+      notes: row.notes,
+      position: row.position,
+    });
+    itemsByDay.set(row.tripDayId, list);
+  }
+
+  return days.map((day) => ({ ...day, items: itemsByDay.get(day.id) ?? [] }));
+}

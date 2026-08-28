@@ -1,0 +1,81 @@
+.dayList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-6);
+}
+
+.day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-2);
+}
+
+.dayHeading {
+  margin: 0;
+  font-size: var(--sv-font-size-md);
+  font-weight: 700;
+  color: var(--sv-color-text-primary);
+}
+
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-2);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-3);
+  width: 100%;
+  padding: var(--sv-space-3);
+  border: var(--sv-border-width-hairline) solid var(--sv-color-border);
+  border-radius: var(--sv-radius-md);
+  background: var(--sv-color-surface);
+  cursor: pointer;
+  text-align: left;
+  touch-action: manipulation;
+}
+
+/* Same "solid border replaces the default subtle one" selection treatment
+   as `TripCard`'s `.cardSelected` — no `--sv-border-width-*` token beyond
+   `hairline` exists today, so this is a plain px bump on top of the
+   token-driven colour above it. */
+.itemActive {
+  border-color: var(--sv-color-text-primary);
+  border-width: 1.5px;
+}
+
+.itemTime {
+  flex-shrink: 0;
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+  width: 44px;
+}
+
+.itemMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-1);
+}
+
+.itemName {
+  font-size: var(--sv-font-size-md);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemMeta {
+  font-size: var(--sv-font-size-xs);
+  color: var(--sv-color-text-muted);
+}
+
+.addActivity {
+  align-self: flex-start;
+}
