@@ -16,6 +16,7 @@
 import { and, asc, eq, lte, gte } from 'drizzle-orm';
 import type { TravellogDb } from '../_db/client';
 import * as schema from '../_db/schema';
+import { addDaysToDateKey } from './dates';
 import { localDateKey, localTimeOfDay } from './timezone';
 
 export interface TripModeItem {
@@ -158,4 +159,59 @@ export async function resolveActiveStop(
       ),
     );
   return row ?? null;
+}
+
+/** `"in 45 min"` under an hour, `"3h"`/`"3h 20m"` at or above — `T.19`'s Trip Mode screen and `T.20`'s reminder text share this exact phrasing. */
+export function formatCountdown(minutes: number): string {
+  if (minutes < 60) return `${String(minutes)} min`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins === 0 ? `${String(hours)}h` : `${String(hours)}h ${String(mins)}m`;
+}
+
+export interface ReminderCandidateStop {
+  stopId: string;
+  tripId: string;
+  tripOwnerId: string;
+  placeLat: number | null;
+  placeLng: number | null;
+}
+
+/**
+ * `T.20` — every stop, across every trip and every owner, whose date range
+ * *might* include "now" in some real-world zone. A stop's `arriveDate`/
+ * `departDate` are local calendar dates in a zone nobody knows yet (only
+ * `resolveTimezoneFromCoords`, downstream, can resolve one, from this same
+ * row's place coordinates) — so this can only narrow candidates with a
+ * generous UTC ± 1 day window (the widest possible skew between a UTC
+ * calendar date and any IANA zone's own), never perform the precise
+ * per-zone check itself. The caller resolves each candidate's real zone,
+ * then calls `resolveTripModeToday` to find out whether today, in *that*
+ * zone, is actually within range.
+ *
+ * No `tenantId` filter: a schedule handler has no session or tenant in
+ * scope (`ScheduleContext` carries neither), and Sovereign is single-tenant
+ * per running instance in v1 anyway — this plugin's isolated database only
+ * ever holds one tenant's rows regardless.
+ */
+export async function listReminderCandidateStops(
+  db: TravellogDb,
+  nowUtcMs: number,
+): Promise<ReminderCandidateStop[]> {
+  const utcToday = localDateKey(nowUtcMs, 'UTC');
+  const from = addDaysToDateKey(utcToday, -1);
+  const to = addDaysToDateKey(utcToday, 1);
+
+  return db
+    .select({
+      stopId: schema.stops.id,
+      tripId: schema.trips.id,
+      tripOwnerId: schema.trips.ownerId,
+      placeLat: schema.places.lat,
+      placeLng: schema.places.lng,
+    })
+    .from(schema.stops)
+    .innerJoin(schema.trips, eq(schema.trips.id, schema.stops.tripId))
+    .innerJoin(schema.places, eq(schema.places.id, schema.stops.placeId))
+    .where(and(lte(schema.stops.arriveDate, to), gte(schema.stops.departDate, from)));
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge, Button, Card, EmptyState, Icon, PageContainer, PageHeader, Spinner } from '@sovereignfs/ui';
 import { getTripModeAction, type TripModeView } from '../actions';
+import { formatCountdown } from '../_lib/trip-mode';
 import { useCurrentPosition } from '../_lib/use-current-position';
 import styles from './TripModeScreen.module.css';
 
@@ -32,13 +33,6 @@ function mapsHandoffUrl(item: {
     return `https://maps.apple.com/?q=${encodeURIComponent(item.placeName)}`;
   }
   return null;
-}
-
-function formatCountdown(minutes: number): string {
-  if (minutes < 60) return `${String(minutes)} min`;
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
-  return mins === 0 ? `${String(hours)}h` : `${String(hours)}h ${String(mins)}m`;
 }
 
 /**

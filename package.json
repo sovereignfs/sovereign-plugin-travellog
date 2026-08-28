@@ -14,13 +14,15 @@
     "nanoid": "^5.0.9",
     "next": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "tz-lookup": "^6.1.25"
   },
   "devDependencies": {
     "@sovereignfs/tsconfig": "workspace:*",
     "@libsql/client": "^0.15.15",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@types/tz-lookup": "^6.1.2",
     "drizzle-kit": "^0.31.10",
     "typescript": "catalog:"
   },

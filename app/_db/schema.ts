@@ -266,6 +266,15 @@ export const itineraryItems = sqliteTable(
     isFixed: integer('is_fixed').notNull().default(0),
     position: real('position').notNull(),
     notes: text('notes'),
+    /**
+     * `T.20` — unix ms, nullable. The claim marker a reminder tick sets via
+     * a conditional `UPDATE … WHERE reminder_sent_at IS NULL` before
+     * sending: `schedules` handlers have no persistence of their own
+     * (`docs/plugin-development.md`: "claim work with conditional updates…
+     * before acting on it"), so this column *is* the idempotency guarantee
+     * that a reminder fires once per item, not once per tick.
+     */
+    reminderSentAt: integer('reminder_sent_at'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },

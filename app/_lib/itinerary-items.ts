@@ -5,7 +5,7 @@
  * notes) is `isFixed` only being meaningful — and only settable — alongside
  * a `plannedTime`.
  */
-import { asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import type { TravellogDb } from '../_db/client';
 import * as schema from '../_db/schema';
 import {
@@ -186,4 +186,39 @@ export async function listItineraryItems(db: TravellogDb, tripDayId: string): Pr
     .from(schema.itineraryItems)
     .where(eq(schema.itineraryItems.tripDayId, tripDayId))
     .orderBy(asc(schema.itineraryItems.position));
+}
+
+/**
+ * `T.20` — claims an item for a reminder send via a conditional update, the
+ * "claim before acting" idempotency `schedules` handlers require
+ * (`docs/plugin-development.md`: ticks can overlap a restart or a
+ * multi-replica deployment, and Phase 1 schedules have no persistence of
+ * their own). Returns whether *this* call won the claim — `false` means
+ * another tick already claimed it, so the caller must not send a second
+ * notification.
+ *
+ * Confirms via a select-back rather than a driver-reported affected-row
+ * count — the same idiom every other write in this file already uses
+ * (`createTrip`/`updateItineraryItem`/etc.'s "select back to confirm"), and
+ * the honest one here specifically: `TravellogDb` is typed as
+ * `BaseSQLiteDatabase` even on Postgres (`_db/client.ts`), so a raw
+ * rowcount isn't guaranteed portable across both dialects the way a plain
+ * `select` always is.
+ */
+export async function claimReminderForItem(
+  db: TravellogDb,
+  itemId: string,
+  claimedAtUtcMs: number,
+): Promise<boolean> {
+  await db
+    .update(schema.itineraryItems)
+    .set({ reminderSentAt: claimedAtUtcMs })
+    .where(and(eq(schema.itineraryItems.id, itemId), isNull(schema.itineraryItems.reminderSentAt)));
+
+  const [row] = await db
+    .select({ reminderSentAt: schema.itineraryItems.reminderSentAt })
+    .from(schema.itineraryItems)
+    .where(eq(schema.itineraryItems.id, itemId));
+
+  return row?.reminderSentAt === claimedAtUtcMs;
 }

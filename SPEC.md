@@ -7,11 +7,135 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.19` shipped, manifest at `0.21.0` (`T.5a`, slot
+🚧 In progress — `T.1`–`T.20` shipped, manifest at `0.22.0` (`T.5a`, slot
 `0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block
-`T.6`–`T.19`). Slice 1 (web) is feature-complete; Slice 2 (web) is
-ship-ready; Slice 3 (Trip Mode) now has both its data/logic layer and its
-mobile screen — `T.20` (notification reminders) is next.
+`T.6`–`T.20`). Slice 1 (web) is feature-complete; Slice 2 (web) is
+ship-ready; Slice 3 (Trip Mode) is now fully built — data/logic layer,
+mobile screen, and reminders — `T.21` (offline capability wiring) is next.
+
+**`T.20` — Notification reminders (`0.22.0`).** "Your next stop is in 20
+minutes" — a manifest-declared `schedules` handler (`app/_jobs/trip-mode-reminders.ts`,
+ticking every minute) that reuses `T.18`'s `resolveTripModeToday` and
+`T.19`'s screen/route as-is; the only new logic is wiring "which stop, right
+now" and "has this item already been reminded" around them. Deliberately
+thin orchestration, same charter `T.8`'s `import-swarm.ts` header comment
+already states for a job handler.
+
+**The real design problem wasn't the notification — it was where a
+background tick gets a timezone from.** `resolveTripModeToday` needs an
+explicit `tzIana`; `T.19` gets it from the browser
+(`Intl.DateTimeFormat().resolvedOptions().timeZone`), but a `schedules`
+handler has no browser, no request, and no session — `ScheduleContext`
+carries only `pluginId`/`scheduleId`/`headers`. `trips.timezone` (`schema.ts`,
+since `T.10`) looks like the obvious answer — a nullable "home zone for
+display" column — but grepping every component confirmed nothing has ever
+written to it (`companions`, its schema neighbor, has a real `TripDetailPanel`
+field; `timezone` never got one). Considered and rejected auto-capturing the
+browser's zone into `trips.timezone` at trip creation: a trip is normally
+planned from *home*, before traveling, so that would systematically capture
+the wrong zone for exactly the international trips a reminder matters most
+for. Asked the developer to pick between that, leaving reminders correctly
+inert until a future task wires up `trips.timezone` from somewhere real, or
+deriving a zone from the active stop's own place coordinates — chose the
+last one, both more correct (a multi-stop trip can genuinely cross zones;
+this always answers for the stop in question, not wherever the trip was
+planned from) and immediately useful for every existing geocoded stop, not
+just future ones.
+
+**New: `_lib/geo-timezone.ts`'s `resolveTimezoneFromCoords(lat, lng)`**,
+wrapping the `tz-lookup` package (~150KB installed, zero dependencies,
+offline boundary-data lookup — evaluated against `geo-tz`, rejected at
+~73MB unpacked with four transitive dependencies, unreasonable for a
+single-purpose lookup in a self-hosted app's Docker image). Returns `null`
+for missing coordinates or a lookup failure — never guesses, same principle
+`_lib/timezone.ts`'s existing header states for visits. Approximate near
+timezone borders (the library's own documented tradeoff); acceptable here
+since a reminder a few minutes off due to a border-adjacent guess is a much
+smaller failure than none at all.
+
+**New: `_lib/trip-mode.ts`'s `listReminderCandidateStops(db, nowUtcMs)`.**
+A stop's `arriveDate`/`departDate` are local calendar dates in a zone
+nobody knows until a place's coordinates resolve one — so this can only
+narrow candidates with a generous UTC ± 1 day window (the widest possible
+skew between a UTC calendar date and any real IANA zone), never perform the
+precise per-zone check itself; the handler resolves each candidate's real
+zone, then calls `resolveTripModeToday` to find out whether today, in
+*that* zone, is actually in range. No `tenantId` filter — a schedule
+handler has no tenant in scope, and Sovereign is single-tenant per running
+instance in v1 anyway (this plugin's isolated database only ever holds one
+tenant's rows regardless). `formatCountdown` also moved here from
+`TripModeScreen.tsx` (now imported, not duplicated) — a schedule handler
+needing the exact same `"3h 20m"` phrasing for reminder text is what turned
+it from a private client-component helper into a shared pure function
+worth its own test coverage.
+
+**New: `_lib/itinerary-items.ts`'s `claimReminderForItem(db, itemId, claimedAtUtcMs)`**
+— the idempotency mechanism `docs/plugin-development.md`'s own `schedules`
+section requires ("claim work with conditional updates… before acting on
+it"): Phase 1 schedules have no persistence of their own, so a restart or
+an overlapping tick must not double-send. A conditional
+`UPDATE … WHERE reminder_sent_at IS NULL` (new nullable `itineraryItems.reminderSentAt`
+column, `T.10`'s tables' first schema change since they shipped — both
+dialect files updated, migrations generated and hand-verified as a clean
+single-column `ALTER TABLE`) followed by a select-back confirms whether
+*this* call won the claim, the same "select back to confirm" idiom every
+other write in that file already uses — deliberately not a driver-reported
+affected-row count, since `TravellogDb` is typed as `BaseSQLiteDatabase`
+even on Postgres (`_db/client.ts`), so a raw rowcount isn't guaranteed
+portable the way a plain `select` always is.
+
+**The lead time is a hardcoded constant (20 minutes), not the operator-configurable
+manifest `env` var its own deliverable phrasing suggested** —
+`NOMINATIM_BASE_URL` is right there as precedent for exactly that pattern.
+Live-testing surfaced why it can't work today: `sdk.env.get()`
+(`packages/sdk/src/env.ts`) calls `next/headers()` with no fallback for a
+background invocation, so it throws outright from a `schedules` handler
+instead of returning `null` — the identical bug class `sdk.storage.*` had
+before this session's earlier platform fix (this repo's own `CLAUDE.md`,
+the `0.101.1` entry), just never generalized to `env.ts`. Declaring an env
+var that would silently never be readable is worse than not offering one;
+flagged as a follow-up platform task rather than fixed here, since a
+correct fix means routing `env.get()` through `requireHost()` the way
+`storage.ts` already does — a platform-repo change, not a plugin one.
+
+**Tests: 21 new (318 → 339 total, all passing).** `geo-timezone.test.ts`
+(new): real coordinates resolve to the correct zone, `null` for missing
+coordinates, `null` (not a throw) for out-of-range input.
+`trip-mode.test.ts` gained `listReminderCandidateStops` coverage (in-window,
+exactly-at-the-edge, weeks-away exclusion, coordinate passthrough
+null/real, scanning across trips *and owners* — the schedule handler has no
+single actor to scope to) and `formatCountdown` coverage (moved, now
+directly unit-tested for the first time). `itinerary-items.test.ts` gained
+`claimReminderForItem` coverage (first claim wins, a second claim on an
+already-claimed item fails, the original claim timestamp persists over a
+later attempt's). New `trip-mode-reminders.test.ts` — the deliverable's own
+review checklist end-to-end against the real handler: sends exactly one
+reminder for a due item with the correct recipient/title/body/url and
+claims it; a second tick sends nothing more; **no reminder for an un-timed
+item**, even on its correct day; nothing for an item outside the lead
+window; nothing for a stop whose place has no coordinates; nothing for a
+candidate stop where the coarse UTC prefilter includes it but the precise
+per-zone check correctly excludes it.
+
+**Live-verified against the real running scheduler, not just the test
+suite** — restarted the dev server (schedule handlers are composed at
+server startup and don't hot-reload, per `docs/plugin-development.md`),
+confirmed `runtime/generated/plugin-schedules.ts` composed the new
+`trip-mode-reminders` entry, then set an existing real itinerary item's
+planned time to ~10 minutes out on a stop covering today. Within one
+~60-second tick, `GET /api/account/notifications` showed a real
+notification — `"Torre de Belém in 10 min"` / `"Planned for 23:15."`,
+correctly addressed to the real signed-in user, deep-linking to `T.19`'s
+Trip Mode screen. Waited through several more ticks and re-checked: still
+exactly one such notification — the claim mechanism holding under the real
+scheduler, not just under a mocked one. (Travellog is `shell: minimal`, so
+this couldn't be checked via a bell icon in its own chrome — verified
+directly against the platform's Notification Center API instead, the same
+one any `shell: default` plugin's bell reads.) No server errors at any
+point during setup or verification.
+
+Full check suite clean: `format:check`, `lint`, this package's `typecheck`,
+`design:tokens:check`, and all 339 travellog tests pass.
 
 **`T.19` — Trip Mode UI (mobile-first) & maps hand-off (`0.21.0`).** The
 actual screen `T.18`'s resolver feeds: `/travellog/planner/[tripId]/mode`,

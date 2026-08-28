@@ -168,6 +168,8 @@ export const itineraryItems = pgTable(
     isFixed: integer('is_fixed').notNull().default(0),
     position: doublePrecision('position').notNull(),
     notes: text('notes'),
+    /** `T.20` — see ./schema.ts's comment. `bigint` like every other timestamp here (this file's own header). */
+    reminderSentAt: bigint('reminder_sent_at', { mode: 'number' }),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },

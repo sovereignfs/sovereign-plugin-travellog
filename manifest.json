@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "fs.sovereign.travellog",
   "name": "Travellog",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "A private, self-hosted trip planner and personal place check-in log.",
   "type": "sovereign",
   "runtime": "native",
@@ -24,6 +24,13 @@
       "entry": "app/_jobs/import-swarm.ts",
       "maxAttempts": 3,
       "description": "Resumable import of an uploaded Swarm data-export ZIP into places, check-ins, and photos."
+    }
+  ],
+  "schedules": [
+    {
+      "id": "trip-mode-reminders",
+      "intervalMinutes": 1,
+      "entry": "app/_jobs/trip-mode-reminders.ts"
     }
   ],
   "env": {

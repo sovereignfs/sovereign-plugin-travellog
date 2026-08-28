@@ -52,7 +52,7 @@ entry for the full account.
 | ------ | ------------------------------------------------ | ------ | --------------------------------------------------------------------------------- |
 | 0.20.0 | Trip Mode data & logic                        | ✅     | [T.18](SPEC.md#t18--trip-mode-data--logic)                                       |
 | 0.21.0 | Trip Mode UI (mobile-first) & maps hand-off   | ✅     | [T.19](SPEC.md#t19--trip-mode-ui-mobile-first--maps-hand-off)                    |
-| 0.22.0 | Notification reminders                        | ⬜     | [T.20](SPEC.md#t20--notification-reminders)                                      |
+| 0.22.0 | Notification reminders                        | ✅     | [T.20](SPEC.md#t20--notification-reminders)                                      |
 | 0.23.0 | Offline capability wiring                     | ⬜     | [T.21](SPEC.md#t21--offline-capability-wiring)                                   |
 | 0.24.0 | Slice 3 hardening & release pass              | ⬜     | [T.22](SPEC.md#t22--slice-3-hardening--release-pass)                             |
 

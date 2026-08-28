@@ -1,9 +1,11 @@
+import { eq } from 'drizzle-orm';
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import * as schema from '../../_db/schema';
 import { createTestDb, type TestDb } from '../../_db/__tests__/test-db';
 import { createTrip } from '../trips';
 import { createStop, listTripDays } from '../stops';
 import {
+  claimReminderForItem,
   createItineraryItem,
   deleteItineraryItem,
   listItineraryItems,
@@ -159,5 +161,36 @@ describe('reorderItineraryItem', () => {
 
     const items = await listItineraryItems(t.travellog, tripDayId);
     expect(items.map((i) => i.id)).toEqual([c.id, a.id, b.id]);
+  });
+});
+
+describe('claimReminderForItem (T.20)', () => {
+  it('the first claim on an unreminded item succeeds', async () => {
+    const item = await createItineraryItem(t.travellog, tripDayId, tripId, {
+      placeId,
+      plannedTime: '19:00',
+    });
+    expect(await claimReminderForItem(t.travellog, item.id, 1_700_000_000_000)).toBe(true);
+  });
+
+  it('a second claim on an already-claimed item fails — a reminder fires once per item', async () => {
+    const item = await createItineraryItem(t.travellog, tripDayId, tripId, {
+      placeId,
+      plannedTime: '19:00',
+    });
+    expect(await claimReminderForItem(t.travellog, item.id, 1_700_000_000_000)).toBe(true);
+    expect(await claimReminderForItem(t.travellog, item.id, 1_700_000_060_000)).toBe(false);
+  });
+
+  it('persists the original claim timestamp, not a later attempt’s', async () => {
+    const item = await createItineraryItem(t.travellog, tripDayId, tripId, {
+      placeId,
+      plannedTime: '19:00',
+    });
+    await claimReminderForItem(t.travellog, item.id, 1_700_000_000_000);
+    await claimReminderForItem(t.travellog, item.id, 1_700_000_060_000);
+
+    const [row] = await t.db.select().from(schema.itineraryItems).where(eq(schema.itineraryItems.id, item.id));
+    expect(row?.reminderSentAt).toBe(1_700_000_000_000);
   });
 });

@@ -3,7 +3,12 @@ import { createTestDb, type TestDb } from '../../_db/__tests__/test-db';
 import { createItineraryItem } from '../itinerary-items';
 import { createPlace } from '../places';
 import { createStop, listTripDays } from '../stops';
-import { resolveActiveStop, resolveTripModeToday } from '../trip-mode';
+import {
+  formatCountdown,
+  listReminderCandidateStops,
+  resolveActiveStop,
+  resolveTripModeToday,
+} from '../trip-mode';
 import { createTrip } from '../trips';
 
 const actor = { tenantId: 'tenant-1', userId: 'user-1' };
@@ -323,5 +328,119 @@ describe('resolveActiveStop (T.19)', () => {
     await createStop(t.travellog, otherTrip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-10' });
 
     expect(await resolveActiveStop(t.travellog, trip.id, '2026-06-10')).toBeNull();
+  });
+});
+
+describe('listReminderCandidateStops (T.20)', () => {
+  it('includes a stop dated today, in the generous UTC ± 1 day window', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
+    const stop = await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-10',
+    });
+
+    const candidates = await listReminderCandidateStops(t.travellog, Date.parse('2026-06-10T12:00:00Z'));
+    expect(candidates.map((c) => c.stopId)).toContain(stop.id);
+  });
+
+  it('includes a stop exactly at the ± 1 day window edge, excludes one just beyond it', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
+    const edgeStop = await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-09',
+      departDate: '2026-06-09',
+    });
+    const beyondPlace = await createPlace(t.travellog, actor, { name: 'Porto', source: 'manual' });
+    const beyondStop = await createStop(t.travellog, trip.id, {
+      placeId: beyondPlace.id,
+      arriveDate: '2026-06-08',
+      departDate: '2026-06-08',
+    });
+
+    // 'now' is noon on 2026-06-10 — the window is [06-09, 06-11].
+    const candidates = await listReminderCandidateStops(t.travellog, Date.parse('2026-06-10T12:00:00Z'));
+    const ids = candidates.map((c) => c.stopId);
+    expect(ids).toContain(edgeStop.id);
+    expect(ids).not.toContain(beyondStop.id);
+  });
+
+  it('excludes a stop weeks away', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
+    const stop = await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-07-01',
+      departDate: '2026-07-03',
+    });
+
+    const candidates = await listReminderCandidateStops(t.travellog, Date.parse('2026-06-10T12:00:00Z'));
+    expect(candidates.map((c) => c.stopId)).not.toContain(stop.id);
+  });
+
+  it('carries the place’s coordinates and the trip’s owner — null coordinates for a coordinate-free place', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
+    const stop = await createStop(t.travellog, trip.id, {
+      placeId, // seeded with no lat/lng in beforeEach
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-10',
+    });
+
+    const [candidate] = await listReminderCandidateStops(t.travellog, Date.parse('2026-06-10T12:00:00Z'));
+    expect(candidate).toMatchObject({
+      stopId: stop.id,
+      tripId: trip.id,
+      tripOwnerId: actor.userId,
+      placeLat: null,
+      placeLng: null,
+    });
+  });
+
+  it('passes through real coordinates when the place has them', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
+    const geocodedPlace = await createPlace(t.travellog, actor, {
+      name: 'Torre de Belém',
+      source: 'manual',
+      lat: 38.691586,
+      lng: -9.2159288,
+    });
+    await createStop(t.travellog, trip.id, {
+      placeId: geocodedPlace.id,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-10',
+    });
+
+    const candidates = await listReminderCandidateStops(t.travellog, Date.parse('2026-06-10T12:00:00Z'));
+    const candidate = candidates.find((c) => c.placeLat !== null);
+    expect(candidate).toMatchObject({ placeLat: 38.691586, placeLng: -9.2159288 });
+  });
+
+  it('scans across every trip and owner — not scoped to one actor', async () => {
+    const otherActor = { tenantId: 'tenant-1', userId: 'user-2' };
+    const trip = await createTrip(t.travellog, otherActor, 'Someone else’s trip');
+    const stop = await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-10',
+    });
+
+    const candidates = await listReminderCandidateStops(t.travellog, Date.parse('2026-06-10T12:00:00Z'));
+    expect(candidates).toContainEqual(expect.objectContaining({ stopId: stop.id, tripOwnerId: 'user-2' }));
+  });
+});
+
+describe('formatCountdown (T.20)', () => {
+  it('formats under an hour as plain minutes', () => {
+    expect(formatCountdown(0)).toBe('0 min');
+    expect(formatCountdown(45)).toBe('45 min');
+  });
+
+  it('formats exactly on the hour with no minutes remainder', () => {
+    expect(formatCountdown(60)).toBe('1h');
+    expect(formatCountdown(180)).toBe('3h');
+  });
+
+  it('formats a partial hour as hours and minutes', () => {
+    expect(formatCountdown(90)).toBe('1h 30m');
+    expect(formatCountdown(200)).toBe('3h 20m');
   });
 });

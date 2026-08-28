@@ -1,0 +1,1 @@
+ALTER TABLE `travellog_itinerary_items` ADD `reminder_sent_at` integer;
