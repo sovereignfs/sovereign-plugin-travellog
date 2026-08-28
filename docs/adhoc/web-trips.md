@@ -3,7 +3,8 @@
 > Wireframe-before-build spec per the `sv-ui-design` workflow. Wireframes in
 > [`web-trips/`](web-trips/). Kept inside the plugin (not the platform's
 > `docs/adhoc/`) because this plugin is externally-maintained. Covers
-> `SPEC.md`'s `T.13` (overview & cards) and `T.14` (detail panel & sharing).
+> `SPEC.md`'s `T.13` (overview & cards), `T.14` (detail panel & sharing),
+> and `T.17` (attachments, screen 6).
 
 ## Problem
 
@@ -94,21 +95,58 @@ contingent on open question 2 (below) resolving toward real shared access**
 — if it resolves toward lightweight companion tags instead, this dialog
 doesn't get built at all; a plain text field replaces it in screen 3.
 
+### 6. Trip detail panel, attachments — `web-trips/06-trip-detail-attachments.svg`
+
+![Trip detail panel with attachments](web-trips/06-trip-detail-attachments.svg)
+
+`T.17`'s hardening-pass addition — `CONCEPT.md`'s Slice 2 scope names
+"attachments (receipts, booking confirmations, accommodation details)"
+explicitly, and `T.10`/`T.11` already built the full data layer (schema,
+CRUD, authz, an upload route) with no web UI ever wired to it. Redrawn
+against the panel's *actual* shipped layout (icon meta rows + a "With"
+companions field, `T.14`'s real deviation from screen 3's `sdk.directory`
+mockup), not screen 3's aspirational one.
+
+- A plain list below "With": one row per attachment (kind icon, title,
+  kind label, a trash icon to delete). No card/border treatment beyond a
+  hairline — this is a utility list, not another set of clickable cards.
+- "+ Add attachment" (dashed, same visual language as Planner's "+ Add a
+  stop"/"+ Add activity" trailing affordances) reveals an inline composer
+  in place — kind select, a title field pre-filled from the picked
+  filename but editable, a `FileDropzone`, Add/Cancel. No dialog: the panel
+  is already the "basic" surface `CONCEPT.md` calls for, and a dialog
+  stacked on top of an already-narrow 360px column would feel heavier than
+  the feature warrants.
+- **Trip-level only** (`attachments.trip_id`, never `trip_day_id`) — the
+  schema supports per-day attachments too, but neither `CONCEPT.md`'s Trips
+  section nor its Planner section describes a per-day attachments UI, and
+  building both doubles this task's scope for a case nobody's asked for
+  yet. Stays schema-supported, exposed later if a real need shows up.
+
 ## States checklist
 
 - **Empty:** screen 2.
 - **Populated:** screen 1, including a trip with only one status group
   present (no "Ongoing" section header renders when nothing is ongoing —
   don't render an empty group header).
-- **Selected / detail:** screen 3.
+- **Selected / detail:** screen 3, extended by screen 6's attachments
+  section — including its own empty state (zero attachments: just the
+  "+ Add attachment" row, no list above it, same "populated list with
+  fewer rows" shape every other list in this plugin uses).
 - **Pending:** dialog buttons flip to "Creating…" / "Adding…"; card CTAs
   don't have a pending state of their own (they navigate, they don't
-  mutate).
+  mutate); the attachment composer's Add button flips to "Uploading…"
+  during the two-step upload-then-create-row sequence.
 - **Error (expected):** inline in dialogs (create-trip name validation,
-  share-dialog "user not found"), input preserved.
+  share-dialog "user not found"), input preserved; the attachment composer
+  shows the upload route's or `createAttachmentAction`'s error inline and
+  keeps the picked file so the user isn't forced to re-pick it.
 - **Error (unexpected):** plugin ships `app/error.tsx`.
 - **Degraded:** n/a for this screen — one data source, `loading.tsx` gates
-  the cold-load skeleton.
+  the cold-load skeleton. Attachments are fetched on demand when the detail
+  column opens (same pattern as Check-ins' `getVisitDetailAction`), not
+  bundled into the cards list fetch — a `loading` flag on the panel covers
+  that window, not a route-level `loading.tsx`.
 
 ## Engineering notes
 
@@ -118,7 +156,17 @@ doesn't get built at all; a plain text field replaces it in screen 3.
   `Dialog`, `Badge`, `EmptyState`, `Button`, `Input`, `Avatar`,
   `ConfirmDialog` (for "Remove" in the share dialog — a member losing
   access is consequential enough to confirm, matching this repo's pattern
-  for other destructive actions).
+  for other destructive actions). Screen 6 adds nothing new either:
+  `FileDropzone` (already used by the Swarm importer and check-in photo
+  upload), `Select`, `Input`, `ConfirmDialog` (delete), `Icon` for the
+  per-kind glyph.
+- **Reuse, don't reinvent (screen 6):** the two-step upload flow (POST the
+  file to a Route Handler for a `storageKey`, then a server action to write
+  the DB row) is the exact same shape `T.7`'s photo upload and `T.8`'s ZIP
+  upload already established, and the route handler itself
+  (`app/(home)/trips/attachments/upload/route.ts`) already existed from
+  `T.10`/`T.11` — this task only had to build the client-side composer that
+  calls it.
 - **No color-coded status badges.** The design system is deliberately
   monochrome (`CLAUDE.md`'s "v1 identity is monochrome"); status is
   distinguished by badge text and the Ongoing card's filled-vs-outline CTA
@@ -150,6 +198,8 @@ Carried from `CONCEPT.md` — not resolved by this wireframe pass:
 
 ## Phasing
 
-Two roadmap tasks, one phase each, sequenced: `T.13` (screens 1, 2, 4) then
-`T.14` (screens 3, 5). `T.14` cannot start until open question 2 is
-resolved, per `SPEC.md`'s own note on that task.
+Three roadmap tasks, sequenced: `T.13` (screens 1, 2, 4) then `T.14`
+(screens 3, 5) then `T.17` (screen 6, once `T.13`–`T.16` have all shipped —
+this is a hardening pass over the whole of Slice 2, not a standalone
+feature task). `T.14` cannot start until open question 2 is resolved, per
+`SPEC.md`'s own note on that task.

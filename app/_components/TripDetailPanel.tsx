@@ -6,6 +6,7 @@ import { Badge, Button, FormField, Icon, OverlayHeader, TagInput, useToast } fro
 import { updateTripAction } from '../actions';
 import { daysBetweenDateKeys, formatDateRange } from '../_lib/dates';
 import type { TripCard as TripCardData } from '../_lib/queries';
+import { TripAttachments } from './TripAttachments';
 import styles from './TripDetailPanel.module.css';
 
 const STATUS_LABEL: Record<TripCardData['status'], string> = {
@@ -105,6 +106,8 @@ export function TripDetailPanel({
             />
           )}
         </FormField>
+
+        <TripAttachments key={trip.id} tripId={trip.id} />
 
         <Button className={styles.openInPlanner} onClick={() => router.push(`/travellog/planner/${trip.id}`)}>
           Open in Planner →

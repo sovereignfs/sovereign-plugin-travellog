@@ -617,6 +617,55 @@ describe('attachment actions', () => {
   });
 });
 
+describe('getTripAttachmentsAction (T.17)', () => {
+  it('returns an empty array for another user’s trip, never leaking that it exists', async () => {
+    const trip = await actions.createTripAction('Portugal 2026');
+    if (!trip.ok) throw new Error('setup failed');
+    harness.currentUser = { id: user2.userId, tenantId: user2.tenantId };
+
+    expect(await actions.getTripAttachmentsAction(trip.trip.id)).toEqual([]);
+  });
+
+  it('resolves each attachment to a signed URL, oldest first', async () => {
+    const trip = await actions.createTripAction('Portugal 2026');
+    if (!trip.ok) throw new Error('setup failed');
+    await actions.createAttachmentAction({
+      tripId: trip.trip.id,
+      kind: 'booking',
+      title: 'Flight confirmation',
+      storageKey: 'attachments/flight.pdf',
+    });
+    await actions.createAttachmentAction({
+      tripId: trip.trip.id,
+      kind: 'receipt',
+      title: 'Hotel receipt',
+      storageKey: 'attachments/hotel.pdf',
+    });
+    harness.signedUrlsByKey.set('attachments/flight.pdf', 'https://signed.example/flight.pdf');
+    harness.signedUrlsByKey.set('attachments/hotel.pdf', 'https://signed.example/hotel.pdf');
+
+    const attachments = await actions.getTripAttachmentsAction(trip.trip.id);
+    expect(attachments).toMatchObject([
+      { kind: 'booking', title: 'Flight confirmation', url: 'https://signed.example/flight.pdf' },
+      { kind: 'receipt', title: 'Hotel receipt', url: 'https://signed.example/hotel.pdf' },
+    ]);
+  });
+
+  it('drops an attachment whose storage object is gone instead of failing the whole list', async () => {
+    const trip = await actions.createTripAction('Portugal 2026');
+    if (!trip.ok) throw new Error('setup failed');
+    await actions.createAttachmentAction({
+      tripId: trip.trip.id,
+      kind: 'other',
+      title: 'Never actually uploaded',
+      storageKey: 'attachments/missing.pdf',
+    });
+    // Deliberately never registered in `signedUrlsByKey` — `getSignedUrl` throws for it.
+
+    expect(await actions.getTripAttachmentsAction(trip.trip.id)).toEqual([]);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // T.12 — auto-link engine, through the action layer
 

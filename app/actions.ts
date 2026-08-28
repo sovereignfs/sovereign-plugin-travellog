@@ -27,8 +27,10 @@ import { recomputeAutoLinksForActor } from './_lib/auto-link';
 import {
   createAttachment,
   deleteAttachment,
+  listAttachments,
   InvalidAttachmentTargetError,
   type AttachmentKind,
+  type AttachmentRow,
 } from './_lib/attachments';
 import {
   requireAttachmentOwner,
@@ -622,6 +624,45 @@ export async function deleteAttachmentAction(attachmentId: string): Promise<Acti
   }
   refresh();
   return ok('Attachment deleted.');
+}
+
+export interface TripAttachmentView {
+  id: string;
+  kind: AttachmentKind;
+  title: string;
+  url: string;
+}
+
+/**
+ * `T.17` — fetched on demand when `TripDetailPanel` opens for a trip, same
+ * "resolve on select, not bundled into the cards list fetch" pattern as
+ * Check-ins' `getVisitDetailAction`. Signed URLs, not raw `storageKey`s,
+ * for the same reason: a client-rendered download/view link needs a URL it
+ * can actually use. Resolves each attachment's URL independently and drops
+ * the ones that fail (`getSignedUrl` throws for a gone/never-uploaded
+ * object) rather than let one bad attachment blank the whole panel — same
+ * defensive shape `getVisitDetailAction` already established for photos.
+ */
+export async function getTripAttachmentsAction(tripId: string): Promise<TripAttachmentView[]> {
+  const actor = await requireUser();
+  const db = await getDb();
+
+  const trip = await requireTripOwner(db, tripId, actor);
+  if (!trip) return [];
+
+  const rows = await listAttachments(db, tripId);
+  const resolved = await Promise.all(
+    rows.map(async (row: AttachmentRow) => {
+      try {
+        const url = await sdk.storage.getSignedUrl(row.storageKey, { expiresInSeconds: 3600 });
+        return { id: row.id, kind: row.kind as AttachmentKind, title: row.title, url };
+      } catch (err) {
+        console.error(`[travellog] Failed to resolve attachment "${row.id}" for trip "${tripId}":`, err);
+        return null;
+      }
+    }),
+  );
+  return resolved.filter((a) => a !== null);
 }
 
 // ---------------------------------------------------------------------------

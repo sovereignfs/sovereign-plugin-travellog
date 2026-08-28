@@ -154,9 +154,11 @@ Don't invent detail here ahead of its own pass — flag it and ask instead:
 
 ## Status
 
-Current manifest version: `0.18.0` (`T.1`–`T.16` shipped — Slice 1 web is
-feature-complete; Slice 2's data model, server layer, auto-link engine,
-Trips screen, and now the whole Planner (trip picker, stop workspace,
-day-by-day itinerary editor with the item detail column) all exist). Task
-history and the reasoning behind every completed task lives in `SPEC.md`'s
-`Status` section — that's the changelog; don't duplicate it here.
+Current manifest version: `0.19.0` (`T.1`–`T.17` shipped — Slice 1 web is
+feature-complete; Slice 2 (web) is ship-ready per its own review checklist
+— data model, server layer, auto-link engine, Trips, and the whole Planner
+all exist, audited live against `CONCEPT.md` in `T.17`, which also closed
+the one real gap that audit found: trip attachments had a complete data
+layer since `T.10`/`T.11` but no web UI until now). Task history and the
+reasoning behind every completed task lives in `SPEC.md`'s `Status`
+section — that's the changelog; don't duplicate it here.

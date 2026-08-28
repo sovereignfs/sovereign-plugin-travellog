@@ -15,7 +15,7 @@
  * DB row — it never touches `sdk.storage`, so it stays trivially testable
  * against a plain ephemeral DB like every other data-layer function here.
  */
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import type { TravellogDb } from '../_db/client';
 import * as schema from '../_db/schema';
 import { newId } from './ids';
@@ -93,4 +93,13 @@ export async function deleteAttachment(db: TravellogDb, attachmentId: string): P
   if (!row) return null;
   await db.delete(schema.attachments).where(eq(schema.attachments.id, attachmentId));
   return row;
+}
+
+/** `T.17` — a trip's attachments, oldest first. The caller resolves ownership before calling this (`../actions.ts`'s own convention). */
+export async function listAttachments(db: TravellogDb, tripId: string): Promise<AttachmentRow[]> {
+  return db
+    .select()
+    .from(schema.attachments)
+    .where(eq(schema.attachments.tripId, tripId))
+    .orderBy(asc(schema.attachments.createdAt));
 }

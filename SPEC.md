@@ -7,11 +7,129 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.16` shipped, manifest at `0.18.0` (`T.5a`, slot
+🚧 In progress — `T.1`–`T.17` shipped, manifest at `0.19.0` (`T.5a`, slot
 `0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block
-`T.6`–`T.16`). Slice 1 (web) is feature-complete; Slice 2's data model,
-server layer, auto-link engine, Trips screen, and now the whole Planner
-(trip picker, stop workspace, day-by-day itinerary editor) all exist.
+`T.6`–`T.17`). Slice 1 (web) is feature-complete; Slice 2 (web) is now
+ship-ready per its own review checklist — data model, server layer,
+auto-link engine, Trips, and the whole Planner all exist and were audited
+live against `CONCEPT.md`.
+
+**`T.17` — Slice 2 hardening & polish pass (web) (`0.19.0`).** A full live
+pass against `CONCEPT.md`'s Slice 2 + Web UI (Trips/Planner) sections,
+driving the real dev server — same charter, and same "fix gaps found live"
+methodology, as `T.9`'s Slice 1 pass.
+
+**One real gap found: trip attachments had a complete data layer and zero
+web UI.** `CONCEPT.md`'s Slice 2 scope names "attachments (receipts,
+booking confirmations, accommodation details)" explicitly, and `T.10`/`T.11`
+already built the schema, CRUD (`_lib/attachments.ts`), authz
+(`requireAttachmentOwner`), and even the upload Route Handler
+(`app/(home)/trips/attachments/upload/route.ts`) — but no component
+anywhere rendered a list, an upload control, or a delete action for them
+(confirmed by grepping every `.tsx` for "attachment" before touching
+anything, not assumed). Closed via a short wireframe pass first
+(`docs/adhoc/web-trips.md` screen 6, per this repo's own "materially new
+layout needs a wireframe" convention) redrawn against the panel's *actual*
+shipped layout, not screen 3's aspirational `sdk.directory`-sharing mockup.
+
+Built: `listAttachments` (`_lib/attachments.ts`, oldest-first, trip-scoped)
+and `getTripAttachmentsAction` (`actions.ts`) — fetched on demand when
+`TripDetailPanel` opens for a trip, same "resolve on select" pattern
+Check-ins' `getVisitDetailAction` already established, resolving each
+attachment's `storageKey` to a signed URL and dropping (not failing the
+whole panel on) any whose storage object is gone, mirroring that action's
+own defensive shape exactly. `TripAttachments` (new component): a plain
+list (icon, title, kind label, delete) below the "With" companions field,
+"+ Add attachment" revealing an inline composer (kind `Select`, a title
+`Input` pre-filled from the picked filename but editable, `FileDropzone`,
+Add/Cancel) rather than a dialog — the detail column is already
+`CONCEPT.md`'s "intentionally basic" surface, and stacking a modal on top
+of an already-narrow 360px column would outweigh what the feature needs.
+The two-step upload flow (POST the file to the existing Route Handler for a
+`storageKey`, then a server action to write the DB row) is the exact same
+shape `T.7`'s photo upload and `T.8`'s ZIP upload already established — no
+new upload pattern invented. **Trip-level only** (`attachments.trip_id`,
+never `trip_day_id`) — the schema supports per-day attachments too, but
+neither `CONCEPT.md`'s Trips nor Planner section describes a per-day
+attachments UI, and building both doubles this task's scope for a case
+nobody's asked for; stays schema-supported, exposed later if a real need
+shows up. `key={trip.id}` on `TripAttachments` forces a full remount on
+trip switch, so an open composer or in-flight state from one trip's panel
+can never leak into another's — same "no stale data flash on switch"
+principle `T.16`'s stop-strip switching established.
+
+Design System Gap Check: no gap — `Select`, `FileDropzone`, `Input`,
+`ConfirmDialog`, `Spinner`, `Icon` all already existed and were used as-is.
+
+Live-verified end-to-end, not just unit-tested: opened the trip detail
+panel, added a real attachment (a synthetic `File` injected via
+`DataTransfer`, same technique `T.9`/`T.8` established for this
+environment) — confirmed the title auto-filled from the picked filename,
+the composer showed "Uploading…", and after completion the row appeared
+with the correct kind label; fetched the resolved `/api/storage/[token]`
+signed URL directly and confirmed it served back the exact bytes uploaded
+with the correct content-type (not just that a link existed); deleted the
+attachment via the confirm dialog and confirmed both the row and (via the
+existing unit test's `deleteCalls` assertion, not re-derived live) the
+storage object are removed. One live-testing mistake worth recording so a
+future pass doesn't repeat it: an early delete attempt used a loose
+`aria-label` substring match that hit the companions `TagInput`'s own
+per-tag remove button first (also labeled "Remove …"), since it sits
+earlier in DOM order — silently removed a real companion tag instead of
+the intended attachment. Caught immediately by inspecting the resulting
+DOM rather than assuming the click landed correctly, restored the tag
+through the same live UI, then redid the delete with the attachment's
+exact, unambiguous `aria-label`. No code was at fault; general lesson for
+any future panel with more than one "Remove"-labeled control nearby: match
+the exact label, never a substring.
+
+**Everything else audited against `CONCEPT.md` and confirmed already
+correct, no changes needed:** Trips' overview block, status-grouped/sorted
+cards, per-status CTA routing (`TripCard.tsx` already implements
+"Continue planning" / "View itinerary" / "Open Trip Mode" / "View trip"
+exactly as specified, including the documented Trip-Mode-is-mobile-only
+substitution), status-chip + name filtering; the companions-tags sharing
+model (`T.10`/`T.14`'s already-documented, deliberate substitution for
+`CONCEPT.md`'s `sdk.directory` sharing, since that open question was still
+unresolved when `T.10` shipped — re-confirmed still the shipped behavior,
+not re-litigated); Planner's trip picker, stop strip (add/reorder), and the
+whole day-by-day itinerary + item detail column from `T.16`.
+
+**Auto-link (`T.12`) was not re-proven live from scratch — a deliberate
+call, not an oversight.** The mechanism's own trigger call sites
+(`_lib/stops.ts`'s `recomputeTripDatesAndAutoLinks`, `_lib/visits.ts`'s
+`createVisit`) were confirmed unchanged by reading them in full, and
+`app/__tests__/actions.test.ts`'s existing `createVisitAction —
+auto-link integration (T.12)` suite already exercises the exact
+action-layer path a live check-in would (a check-in inside a trip's stop
+window auto-links; one outside stays unlinked, not an error) — still
+green in this task's own full-suite run, not just assumed passing. What
+*was* newly live-verified: the check-in creation flow itself (search →
+select → confirm) still works end-to-end through the real web UI after
+`T.13`–`T.16`'s otherwise-unrelated changes — created a real check-in at
+"Torre de Belém" this way, confirmed it landed on the Check-ins timeline
+with no trip badge (correct: today's date falls outside the one seeded
+trip's window).
+
+**Tooling note for future live-testing sessions:** the check-in page's
+(`app/checkin/page.tsx`) place-search `SuggestionInput` did not reliably
+open its suggestions popover when driven by the
+native-setter-plus-`dispatchEvent('input')` technique this session had
+used successfully everywhere else (`AddStopDialog`, `AddItineraryItemDialog`)
+— the debounced `searchPlacesAction` call still fired and returned real
+results (confirmed via the network log), but the popover's `open` state
+never flipped, even after an explicit `.focus()` and generous waits.
+Root cause not fully isolated (geolocation was ruled out — `useCurrentPosition`
+never auto-requests). A real, hardware-level `computer` click + `type`
+sequence worked immediately on the same element. Not chased further since
+this is pre-existing, already-shipped `T.7` code untouched by this task;
+recorded here so a future session doesn't waste time re-diagnosing the
+same page.
+
+Full check suite clean: `format:check`, `lint`, this package's `typecheck`,
+`design:tokens:check`, and all 296 travellog tests (290 existing + 6 new:
+3 in `attachments.test.ts` for `listAttachments`, 3 in `actions.test.ts`
+for `getTripAttachmentsAction`) pass.
 
 **`T.16` — Planner: day-by-day itinerary editor (`0.18.0`).**
 `docs/adhoc/web-planner.md` screens 2 (the populated day-by-day list) and 5
