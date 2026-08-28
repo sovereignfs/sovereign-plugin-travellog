@@ -76,7 +76,13 @@ import {
   type StopRow,
   type UpdateStopInput,
 } from './_lib/stops';
-import { isValidIanaTimeZone } from './_lib/timezone';
+import { isValidIanaTimeZone, localDateKey } from './_lib/timezone';
+import {
+  resolveActiveStop,
+  resolveTripModeToday,
+  type ActiveStopInfo,
+  type TripModeToday,
+} from './_lib/trip-mode';
 import { createTrip, deleteTrip, updateTrip, type TripRow, type UpdateTripInput } from './_lib/trips';
 import {
   createVisit,
@@ -715,4 +721,44 @@ export async function recomputeMyAutoLinksAction(): Promise<ActionResult> {
       ? 'Check-in links are already up to date.'
       : `Updated ${String(changed)} check-in link${changed === 1 ? '' : 's'}.`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Trip Mode (T.19)
+
+export interface TripModeView {
+  stop: ActiveStopInfo;
+  today: TripModeToday;
+}
+
+/**
+ * `nowUtcMs`/`tzIana` are the caller's own current instant and zone — never
+ * guessed server-side, same rule `createVisitAction`'s own `tzIana`
+ * parameter already follows. Returns `null` both when the caller doesn't
+ * own the trip and when no stop covers today: the caller can't tell "not
+ * yours" from "not active right now" apart from this alone, which is
+ * exactly right — the former matches this file's "denial reads as not
+ * found" convention, the latter is `T.19`'s own "empty state outside the
+ * trip's real date range" deliverable, and neither should look different
+ * from the other to someone probing for a trip id that isn't theirs.
+ */
+export async function getTripModeAction(
+  tripId: string,
+  nowUtcMs: number,
+  tzIana: string,
+): Promise<TripModeView | null> {
+  const actor = await requireUser();
+  const db = await getDb();
+
+  const trip = await requireTripOwner(db, tripId, actor);
+  if (!trip || !isValidIanaTimeZone(tzIana)) return null;
+
+  const dateKey = localDateKey(nowUtcMs, tzIana);
+  const stop = await resolveActiveStop(db, tripId, dateKey);
+  if (!stop) return null;
+
+  const today = await resolveTripModeToday(db, stop.stopId, nowUtcMs, tzIana);
+  if (!today) return null;
+
+  return { stop, today };
 }

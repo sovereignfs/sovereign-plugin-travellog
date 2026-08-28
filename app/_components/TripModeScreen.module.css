@@ -1,0 +1,127 @@
+.loading {
+  display: flex;
+  justify-content: center;
+  padding: var(--sv-space-8) 0;
+}
+
+.positionRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-2);
+  padding: var(--sv-space-2) 0;
+  color: var(--sv-color-text-muted);
+  font-size: var(--sv-font-size-sm);
+}
+
+.positionText {
+  flex: 1;
+}
+
+.positionButton {
+  all: unset;
+  cursor: pointer;
+  color: var(--sv-color-text-primary);
+  font-size: var(--sv-font-size-xs);
+  text-decoration: underline;
+}
+
+.nextCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-1);
+  margin: var(--sv-space-4) 0;
+}
+
+.nextLabel {
+  font-size: var(--sv-font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--sv-color-text-muted);
+}
+
+.nextName {
+  font-size: var(--sv-font-size-lg);
+  font-weight: 700;
+  color: var(--sv-color-text-primary);
+}
+
+.nextMeta {
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-muted);
+}
+
+.handoffLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sv-space-2);
+  margin-top: var(--sv-space-2);
+  padding: var(--sv-space-2) var(--sv-space-3);
+  align-self: flex-start;
+  border-radius: var(--sv-radius-md);
+  background: var(--sv-color-text-primary);
+  color: var(--sv-color-surface);
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-2);
+  margin-top: var(--sv-space-4);
+}
+
+.sectionHeading {
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+}
+
+.emptyToday {
+  margin: 0;
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-muted);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-2);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-3);
+  padding: var(--sv-space-3);
+  border: var(--sv-border-width-hairline) solid var(--sv-color-border);
+  border-radius: var(--sv-radius-md);
+}
+
+.rowTime {
+  flex-shrink: 0;
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+  width: 44px;
+}
+
+.rowMain {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkinButton {
+  margin-top: var(--sv-space-6);
+  width: 100%;
+}

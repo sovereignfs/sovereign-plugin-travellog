@@ -13,7 +13,7 @@
  * resequencing (`CONCEPT.md`'s "Future (deferred)"). This resolves the
  * plan exactly as manually ordered, nothing smarter.
  */
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, lte, gte } from 'drizzle-orm';
 import type { TravellogDb } from '../_db/client';
 import * as schema from '../_db/schema';
 import { localDateKey, localTimeOfDay } from './timezone';
@@ -22,6 +22,9 @@ export interface TripModeItem {
   id: string;
   placeId: string | null;
   placeName: string | null;
+  /** Nullable — a title-only item (or one whose place has no geocoded coordinates) has nothing to hand off to a maps app. */
+  placeLat: number | null;
+  placeLng: number | null;
   title: string | null;
   plannedTime: string | null;
   isFixed: boolean;
@@ -78,6 +81,8 @@ export async function resolveTripModeToday(
       id: schema.itineraryItems.id,
       placeId: schema.itineraryItems.placeId,
       placeName: schema.places.name,
+      placeLat: schema.places.lat,
+      placeLng: schema.places.lng,
       title: schema.itineraryItems.title,
       plannedTime: schema.itineraryItems.plannedTime,
       isFixed: schema.itineraryItems.isFixed,
@@ -93,6 +98,8 @@ export async function resolveTripModeToday(
     id: row.id,
     placeId: row.placeId,
     placeName: row.placeName,
+    placeLat: row.placeLat,
+    placeLng: row.placeLng,
     title: row.title,
     plannedTime: row.plannedTime,
     isFixed: row.isFixed === 1,
@@ -110,4 +117,45 @@ export async function resolveTripModeToday(
     : null;
 
   return { tripDayId: day.id, date, items, nextItem, countdownMinutes };
+}
+
+export interface ActiveStopInfo {
+  stopId: string;
+  placeName: string;
+  arriveDate: string;
+  departDate: string;
+}
+
+/**
+ * `T.19` — which of a trip's stops (if any) covers `dateKey`. A trip's
+ * stops never overlap by construction (each is added/edited through
+ * `_lib/stops.ts`'s own date validation against the others in sequence),
+ * so at most one row can match — `null` when today falls before the first
+ * stop, after the last, or in a gap between two stops with no days of
+ * their own. This is the trip-wide half of Trip Mode's "active only within
+ * the trip's real date range" gate; `resolveTripModeToday`, above, only
+ * ever answers for a stop it's already been told about.
+ */
+export async function resolveActiveStop(
+  db: TravellogDb,
+  tripId: string,
+  dateKey: string,
+): Promise<ActiveStopInfo | null> {
+  const [row] = await db
+    .select({
+      stopId: schema.stops.id,
+      placeName: schema.places.name,
+      arriveDate: schema.stops.arriveDate,
+      departDate: schema.stops.departDate,
+    })
+    .from(schema.stops)
+    .innerJoin(schema.places, eq(schema.places.id, schema.stops.placeId))
+    .where(
+      and(
+        eq(schema.stops.tripId, tripId),
+        lte(schema.stops.arriveDate, dateKey),
+        gte(schema.stops.departDate, dateKey),
+      ),
+    );
+  return row ?? null;
 }

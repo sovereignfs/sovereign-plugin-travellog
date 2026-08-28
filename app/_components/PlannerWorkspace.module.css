@@ -32,3 +32,15 @@
   font-size: var(--sv-font-size-sm);
   color: var(--sv-color-text-muted);
 }
+
+.startTripMode {
+  align-self: flex-start;
+  margin-top: var(--sv-space-2);
+  padding: var(--sv-space-2) var(--sv-space-3);
+  border-radius: var(--sv-radius-md);
+  background: var(--sv-color-text-primary);
+  color: var(--sv-color-surface);
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  text-decoration: none;
+}

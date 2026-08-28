@@ -821,3 +821,65 @@ describe('recomputeMyAutoLinksAction', () => {
     });
   });
 });
+
+describe('getTripModeAction (T.19)', () => {
+  it('returns null for another user’s trip, never leaking that it exists', async () => {
+    const trip = await actions.createTripAction('Portugal 2026');
+    if (!trip.ok) throw new Error('setup failed');
+    harness.currentUser = { id: user2.userId, tenantId: user2.tenantId };
+
+    expect(
+      await actions.getTripModeAction(trip.trip.id, Date.parse('2026-06-10T12:00:00Z'), 'UTC'),
+    ).toBeNull();
+  });
+
+  it('returns null when no stop covers today — outside the trip’s real date range', async () => {
+    const trip = await actions.createTripAction('Portugal 2026');
+    if (!trip.ok) throw new Error('setup failed');
+    const stop = await actions.createStopAction(trip.trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-12',
+    });
+    if (!stop.ok) throw new Error('setup failed');
+
+    expect(
+      await actions.getTripModeAction(trip.trip.id, Date.parse('2026-06-20T12:00:00Z'), 'UTC'),
+    ).toBeNull();
+  });
+
+  it('returns null for an invalid timezone rather than throwing', async () => {
+    const trip = await actions.createTripAction('Portugal 2026');
+    if (!trip.ok) throw new Error('setup failed');
+
+    expect(
+      await actions.getTripModeAction(trip.trip.id, Date.parse('2026-06-10T12:00:00Z'), 'Not/A_Zone'),
+    ).toBeNull();
+  });
+
+  it('the owner gets today’s active stop, its items, and the next one', async () => {
+    const trip = await actions.createTripAction('Portugal 2026');
+    if (!trip.ok) throw new Error('setup failed');
+    const stop = await actions.createStopAction(trip.trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-10',
+    });
+    if (!stop.ok) throw new Error('setup failed');
+    const [day] = await t.db.select().from(schema.tripDays).where(eq(schema.tripDays.stopId, stop.stop.id));
+    if (!day) throw new Error('expected a trip day');
+
+    await actions.createItineraryItemAction(day.id, { placeId, plannedTime: '09:00' });
+    await actions.createItineraryItemAction(day.id, { placeId, plannedTime: '18:00' });
+
+    const result = await actions.getTripModeAction(
+      trip.trip.id,
+      Date.parse('2026-06-10T10:00:00Z'), // between the two items
+      'UTC',
+    );
+    expect(result?.stop.stopId).toBe(stop.stop.id);
+    expect(result?.today.items).toHaveLength(2);
+    expect(result?.today.nextItem?.plannedTime).toBe('18:00');
+    expect(result?.today.countdownMinutes).toBe(480);
+  });
+});

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Button, EmptyState } from '@sovereignfs/ui';
+import { Button, EmptyState, useIsMobile } from '@sovereignfs/ui';
 import { formatDateRange } from '../_lib/dates';
 import type { WorkspaceDay, WorkspaceItineraryItem, WorkspaceStop } from '../_lib/queries';
 import { AddStopDialog } from './AddStopDialog';
@@ -42,6 +42,7 @@ export function PlannerWorkspace({
   initialDays: WorkspaceDay[];
 }) {
   const router = useRouter();
+  const isMobile = useIsMobile();
   // Not copied into local state — `stops` is the server-fetched prop
   // directly, and `router.refresh()` (after an add or a reorder) is what
   // keeps it current. `PlannerStopStrip` holds its own local, optimistic
@@ -112,6 +113,17 @@ export function PlannerWorkspace({
               </Link>
               <h1 className={styles.title}>{trip.name}</h1>
               <p className={styles.meta}>{metaLine}</p>
+              {/* `T.19`'s entry point — `CONCEPT.md`'s Planner section: "Trip
+                  Mode's entry point lives here, mobile-only." Gated on
+                  `useIsMobile()` rather than always showing it: the screen
+                  it leads to is explicitly mobile-first (no desktop layout
+                  pass has happened for it), so surfacing it on desktop would
+                  point at a screen that was never meant to be used there. */}
+              {isMobile && stops.length > 0 && (
+                <Link href={`/travellog/planner/${trip.id}/mode`} className={styles.startTripMode}>
+                  Start Trip Mode →
+                </Link>
+              )}
             </div>
 
             {stops.length === 0 ? (

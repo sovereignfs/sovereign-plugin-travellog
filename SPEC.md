@@ -7,11 +7,107 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.18` shipped, manifest at `0.20.0` (`T.5a`, slot
+🚧 In progress — `T.1`–`T.19` shipped, manifest at `0.21.0` (`T.5a`, slot
 `0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block
-`T.6`–`T.18`). Slice 1 (web) is feature-complete; Slice 2 (web) is
-ship-ready; Slice 3 (Trip Mode) now has its data/logic layer — `T.19`
-(the actual mobile screen) is next.
+`T.6`–`T.19`). Slice 1 (web) is feature-complete; Slice 2 (web) is
+ship-ready; Slice 3 (Trip Mode) now has both its data/logic layer and its
+mobile screen — `T.20` (notification reminders) is next.
+
+**`T.19` — Trip Mode UI (mobile-first) & maps hand-off (`0.21.0`).** The
+actual screen `T.18`'s resolver feeds: `/travellog/planner/[tripId]/mode`,
+entered via the new "Start Trip Mode →" link on `PlannerWorkspace`'s header
+(gated behind `useIsMobile()` — `CONCEPT.md`'s "Trip Mode's entry point
+lives here, mobile-only" framing, and there's no desktop design pass for
+the destination screen to show on desktop anyway).
+
+**A new top-level route tree, not nested under `(home)`'s
+`ThreeColumnLayout`** — the same reasoning `T.7`'s `app/checkin/page.tsx`
+already established: that layout "has no responsive behavior and is
+confirmed broken below 768px," which would defeat a screen that's
+explicitly mobile-only. Next.js route groups are invisible to the URL, so
+`(home)/planner/[tripId]` (the workspace, `/planner/[tripId]`) and the new
+`planner/[tripId]/mode` (`/planner/[tripId]/mode`) coexist without
+collision despite the shared dynamic segment name. The page itself only
+resolves trip ownership server-side; `TripModeScreen` (client) decides
+whether *today* is actually active, since that needs the caller's own
+local instant and IANA zone — neither of which the server can know, same
+rule `T.18`'s `resolveTripModeToday` already follows.
+
+**New server-side primitive: `resolveActiveStop`** (`_lib/trip-mode.ts`).
+The route carries a `tripId` but no `stopId` — Trip Mode needs to derive
+*which* stop, if any, covers "today" from the trip's own stops' date
+ranges (`arriveDate <= today <= departDate`; a trip's stops never overlap
+by construction, so at most one row ever matches). Composes cleanly with
+`T.18`'s existing stop-scoped `resolveTripModeToday` behind one new action,
+`getTripModeAction(tripId, nowUtcMs, tzIana)`: resolve the active stop,
+then resolve today's schedule for it, returning `null` (not a redirect)
+when nothing covers today — the deliverable's own "active only within the
+trip's real date range" requirement, satisfied as an empty state rather
+than routing logic.
+
+**Maps hand-off: Apple Maps universal links (`https://maps.apple.com/...`),
+not the `maps://` custom URI scheme** — the one deep-link convention the
+deliverable calls for ("pick one... don't build three"). Reasoning
+documented in `mapsHandoffUrl()` itself: iOS intercepts this host directly
+from a plain `<a>` tag with no scheme registration or confirmation prompt,
+and it degrades gracefully to the Apple Maps *website* on a platform with
+no native app, rather than a dead custom-scheme link. `daddr` draws
+directions when a place has real coordinates; falls back to a plain named
+search (`q` only) when it doesn't, and to no link at all for a title-only
+item with neither.
+
+**This screen's layout is deliberately plain and undesigned**, per the
+deliverable's own note that the mobile UI concept-review pass hasn't
+happened yet — same precedent `T.7`'s `checkin/page.tsx` already set, cited
+directly in this screen's own doc comment rather than re-justified from
+scratch.
+
+**Tests: 10 new (308 → 318 total, all passing).** `trip-mode.test.ts` gained
+a `resolveActiveStop` block (no stops → `null`; correct range match;
+boundary-`null` the day immediately before/after a stop's range; correct
+selection among multiple stops with a gap between them; trip-scoping) plus
+a `TripModeItem` lat/lng passthrough check. `actions.test.ts` gained a
+`getTripModeAction` block covering another-user denial, no-active-stop
+`null`, invalid-timezone `null`, and the happy path (two items, correct
+`nextItem`/`countdownMinutes`).
+
+**Live verification, both states, real dev server:**
+
+- **Empty state** — the existing "Kyoto & Osaka" trip (dated Sep 2–4,
+  outside "today"): `/mode` renders the "Trip Mode isn't active right now"
+  `EmptyState` with an "Open in Planner" action, not a crash or a redirect
+  loop.
+- **Populated state** — a new "Lisbon Today Test" trip with a stop spanning
+  today, one itinerary item added with a planned time later than the real
+  clock: the screen renders the stop name as title, trip name as subtitle,
+  the position row (`useCurrentPosition`, "Location not shared" +
+  "Share location" — no permission granted in this pass), a "Next" card
+  with a correct live countdown (`23:50 · in 18 min`), a working
+  "Directions" link, the "Today" list showing the same item, and the
+  "Quick check-in" button. Zero console errors; the `getTripModeAction`
+  POST returned `200`.
+- **Mobile viewport (375px)** — the Trip Mode screen itself reads correctly
+  at mobile width (no overflow, no truncation); `PageHeader` hides its
+  description line at this width, a pre-existing `@sovereignfs/ui`
+  behavior, not something introduced here. Confirmed the "Start Trip
+  Mode →" link is present in the DOM on `PlannerWorkspace` at the same
+  width (`useIsMobile()` correctly flips true) — the visual layout around
+  it is squished, but that's `ThreeColumnLayout`'s already-documented
+  "broken below 768px" limitation on the *workspace* page, not a
+  regression introduced by this task's entry-point link.
+- **Maps hand-off on a real iOS Simulator (booted iPhone 17) — the
+  deliverable's own required checklist item.** Opened the exact generated
+  URL (`https://maps.apple.com/?daddr=38.691586,-9.2159288&q=Torre%20de%20Bel%C3%A9m`)
+  directly on-device. Confirmed the *native Maps app* launched, not Safari:
+  first the system's own "Allow 'Maps' to use your location?" permission
+  sheet (a prompt only the native app can trigger), then Maps' own
+  first-run onboarding screen ("Get Notified when Friends Share Their
+  ETAs"), then Maps' real Directions sheet with an origin of "My Location"
+  and a destination of `38.691586,-9.215929` — matching the generated
+  `daddr` coordinates exactly.
+
+Full check suite clean: `format:check`, `lint`, this package's `typecheck`,
+`design:tokens:check`, and all 318 travellog tests pass.
 
 **`T.18` — Trip Mode data & logic (`0.20.0`).** The server-side "what does
 today look like right now" query — `resolveTripModeToday` (new

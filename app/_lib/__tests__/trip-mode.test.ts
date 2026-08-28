@@ -3,7 +3,7 @@ import { createTestDb, type TestDb } from '../../_db/__tests__/test-db';
 import { createItineraryItem } from '../itinerary-items';
 import { createPlace } from '../places';
 import { createStop, listTripDays } from '../stops';
-import { resolveTripModeToday } from '../trip-mode';
+import { resolveActiveStop, resolveTripModeToday } from '../trip-mode';
 import { createTrip } from '../trips';
 
 const actor = { tenantId: 'tenant-1', userId: 'user-1' };
@@ -238,5 +238,90 @@ describe('resolveTripModeToday (T.18 review checklist)', () => {
       'UTC',
     );
     expect(result).toBeNull();
+  });
+
+  it('carries a place-backed item’s coordinates, for the maps hand-off — null for a title-only item', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
+    const stop = await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-10',
+    });
+    const [day] = await listTripDays(t.travellog, stop.id);
+    if (!day) throw new Error('expected a trip day');
+
+    await createItineraryItem(t.travellog, day.id, trip.id, { placeId, plannedTime: '09:00' });
+    await createItineraryItem(t.travellog, day.id, trip.id, { title: 'Free time', plannedTime: '11:00' });
+
+    const result = await resolveTripModeToday(
+      t.travellog,
+      stop.id,
+      Date.parse('2026-06-10T06:00:00Z'),
+      'UTC',
+    );
+    // 'Belém Tower' seeded in beforeEach with no explicit lat/lng, so both
+    // resolve to null here too — the point under test is that a place-backed
+    // item's coordinates pass through *at all* (vs. being dropped by the
+    // query), not any particular non-null value.
+    expect(result?.items[0]).toMatchObject({ placeId, placeLat: null, placeLng: null });
+    expect(result?.items[1]).toMatchObject({ title: 'Free time', placeId: null, placeLat: null, placeLng: null });
+  });
+});
+
+describe('resolveActiveStop (T.19)', () => {
+  it('returns null for a trip with no stops', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Someday trip');
+    expect(await resolveActiveStop(t.travellog, trip.id, '2026-06-10')).toBeNull();
+  });
+
+  it('returns the stop whose [arriveDate, departDate] range covers the given date', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
+    const stop = await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-12',
+    });
+
+    for (const dateKey of ['2026-06-10', '2026-06-11', '2026-06-12']) {
+      const result = await resolveActiveStop(t.travellog, trip.id, dateKey);
+      expect(result?.stopId).toBe(stop.id);
+      expect(result?.placeName).toBe('Belém Tower');
+    }
+  });
+
+  it('returns null just before arrival and just after departure', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
+    await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+
+    expect(await resolveActiveStop(t.travellog, trip.id, '2026-06-09')).toBeNull();
+    expect(await resolveActiveStop(t.travellog, trip.id, '2026-06-13')).toBeNull();
+  });
+
+  it('picks the right stop out of several, and null in a gap between two stops', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Two-stop trip');
+    const place2 = await createPlace(t.travellog, actor, { name: 'Porto', source: 'manual' });
+    const stop1 = await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-11',
+    });
+    const stop2 = await createStop(t.travellog, trip.id, {
+      placeId: place2.id,
+      arriveDate: '2026-06-13',
+      departDate: '2026-06-14',
+    });
+
+    expect((await resolveActiveStop(t.travellog, trip.id, '2026-06-10'))?.stopId).toBe(stop1.id);
+    expect((await resolveActiveStop(t.travellog, trip.id, '2026-06-14'))?.stopId).toBe(stop2.id);
+    // 2026-06-12 falls in the gap between the two stops — no leg travels through it.
+    expect(await resolveActiveStop(t.travellog, trip.id, '2026-06-12')).toBeNull();
+  });
+
+  it('scopes to the given trip — another trip’s stop never leaks in', async () => {
+    const trip = await createTrip(t.travellog, actor, 'Trip A');
+    const otherTrip = await createTrip(t.travellog, actor, 'Trip B');
+    await createStop(t.travellog, otherTrip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-10' });
+
+    expect(await resolveActiveStop(t.travellog, trip.id, '2026-06-10')).toBeNull();
   });
 });
