@@ -1,6 +1,6 @@
 # Sovereign Travellog — Roadmap
 
-**Manifest version:** 0.26.0 · **Last updated:** 2026-08-29
+**Manifest version:** 0.27.0 · **Last updated:** 2026-08-29
 
 Chronological build index — one row per PR, platform-`ROADMAP.md` style. Full
 task detail lives in [SPEC.md](SPEC.md); the product concept in
@@ -12,10 +12,17 @@ convention). Slots are volatile ordering; task IDs (`T.<seq>`) are the stable
 identifiers. Each task = one branch = one PR = one review gate; tasks depend
 on the previous row unless noted.
 
-This is the third pass over this file — `T.5`'s implementation surfaced a
-real gap (nothing provided a way back to Launcher) and added `T.5a` to close
-it, shifting every slot after `T.5` down by one. See `SPEC.md`'s `T.5` status
-entry for the full account.
+This is the fourth pass over this file. The third pass: `T.5`'s
+implementation surfaced a real gap (nothing provided a way back to
+Launcher) and added `T.5a` to close it, shifting every slot after `T.5`
+down by one — see `SPEC.md`'s `T.5` status entry for that account. This
+(fourth) pass: `T.5a` itself finally shipped, but not at its
+originally-reserved `0.7.0` slot — every task from `T.6` through `T.24`
+landed in strict sequence while `T.5a` sat deferred (`[parallel]`, blocking
+nothing), so `0.7.0` was never actually tagged in `manifest.json`'s real
+history. Its row moved out of Phase 1a (where it was reserved) down into
+Phase 1d at `0.27.0`, its real landing slot — leaving a stale `0.7.0`
+reference anywhere would point at a version that was never shipped.
 
 ## Phase 1a — Check-in foundation & web shell (Slice 1)
 
@@ -27,7 +34,6 @@ entry for the full account.
 | 0.4.0  | OSM place-search adapter `[parallel]`             | ✅     | [T.3a](SPEC.md#t3a--osm-place-search-adapter-parallel-with-t4)                   |
 | 0.5.0  | Server data layer & actions: check-in             | ✅     | [T.4](SPEC.md#t4--server-data-layer--actions-check-in)                           |
 | 0.6.0  | Web shell: sidebar nav & `ThreeColumnLayout` scaffold | ✅ | [T.5](SPEC.md#t5--web-shell-sidebar-nav--threecolumnlayout-scaffold)             |
-| 0.7.0  | App switcher & account menu chrome `[parallel]`   | ⬜     | [T.5a](SPEC.md#t5a--app-switcher--account-menu-chrome-parallel-with-t6)          |
 | 0.8.0  | Check-ins screen (web): timeline & detail         | ✅     | [T.6](SPEC.md#t6--check-ins-screen-web-timeline--detail)                         |
 | 0.9.0  | Check-in creation (mobile)                        | ✅     | [T.7](SPEC.md#t7--check-in-creation-mobile)                                      |
 | 0.10.0 | Swarm importer                                    | ✅     | [T.8](SPEC.md#t8--swarm-importer)                                                |
@@ -62,10 +68,12 @@ entry for the full account.
 | ------ | ---------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------ |
 | 0.25.0 | Sovereign portability hooks (export/import/delete)            | ✅     | [T.23](SPEC.md#t23--sovereign-portability-hooks-exportimportdelete)                                    |
 | 0.26.0 | App-level field encryption for `visit.note` (RFC 0092)        | ✅     | [T.24](SPEC.md#t24--app-level-field-encryption-for-visitnote-rfc-0092)                                 |
+| 0.27.0 | App switcher & account menu chrome `[parallel]`               | ✅     | [T.5a](SPEC.md#t5a--app-switcher--account-menu-chrome-parallel-with-t6)                                |
 
 Phase 1 is now complete — every task above, web and mobile data layer alike,
-has shipped. `T.24` was tagged `[optional, deferred]` (not required for
-phase 1 to ship) but was picked up on request rather than left open.
+has shipped. `T.24` and `T.5a` were both tagged deferred/non-blocking (not
+required for phase 1 to ship) but were picked up on request rather than
+left open.
 
 **Not yet slotted, deliberately** (per `CONCEPT.md`'s "Deferred, not yet
 planned" and "Future (deferred): trip navigation & route optimization"):
@@ -86,11 +94,16 @@ slotted once their own concept-review/design pass happens.
   platform's own header/footer chrome would double up navigation, the same
   reasoning `sovereign-plugin-kanban` and `sovereign-plugin-docs` both
   document for the same choice.
-- **`T.5a` (apps switcher + account menu) is non-blocking, deliberately
-  slotted right after `T.5` rather than left to drift to the end** — it's
-  real, user-visible chrome (not cosmetic), but nothing in Slice 1/2's own
-  build order needs it to function, so it can land whenever convenient
-  without holding up `T.6` onward.
+- **`T.5a` (apps switcher + account menu) was slotted right after `T.5`,
+  not left to drift to the end — in intent, not in outcome.** It's real,
+  user-visible chrome (not cosmetic), and nothing in Slice 1/2's own build
+  order needed it to function, so it was deliberately non-blocking: land
+  whenever convenient without holding up `T.6` onward. In practice "whenever
+  convenient" never arrived on its own — it shipped at `0.27.0`, after every
+  other phase 1 task including the optional `T.24`, once explicitly asked
+  for. The lesson, not repeated elsewhere in this roadmap: a `[parallel]`
+  task with zero downstream dependents has no forcing function of its own
+  and can sit indefinitely unless someone deliberately picks it back up.
 - **Check-ins viewing (`T.6`, web) before check-in capture (`T.7`,
   mobile)** — `T.6` clusters with the rest of Slice 1's web-shell-based work
   (`T.5` onward), while `T.7` is this slice's one mobile-only task, and

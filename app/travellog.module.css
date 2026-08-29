@@ -81,6 +81,238 @@
   font-weight: 600;
 }
 
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-2);
+}
+
+/* Apps trigger (opens the `AppsMenu` popover) — the actual Launcher plugin's
+   own icon, not the instance badge (see `.headerBrandBadge`, above, for why
+   they're deliberately separate controls). A `<button>`, so needs its own
+   reset — a plain `<button>` otherwise carries a border/padding/background
+   this icon-only trigger doesn't want. */
+.headerAppsButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--sv-radius-md);
+  background: transparent;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .headerAppsButton:hover {
+    background: var(--sv-color-surface-sunken);
+  }
+}
+
+.headerAppsIcon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
+/* Same SVG-can't-inherit-currentColor treatment as `.headerBrandIcon` above. */
+:global([data-theme='dark']) .headerAppsIcon {
+  filter: invert(1);
+}
+
+.headerAvatarLink {
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--sv-radius-full);
+  background: transparent;
+  cursor: pointer;
+}
+
+/* Matches the platform shell's own trigger/menu avatar treatment
+   (`runtime/app/(platform)/shell.module.css`'s `.avatar` and
+   `AccountMenu.module.css`'s `.menuAvatar`) — filled with the DS's monochrome
+   accent token rather than `Avatar`'s own default (a bordered, unfilled
+   `--sv-color-surface-raised` circle). `--sv-color-accent` is near-black in
+   light mode, near-white in dark mode (the DS's own monochrome identity), so
+   this needs no light/dark-specific rule of its own. `!important` required
+   on all three — overrides `Avatar`'s own `.avatar` class rule, which
+   otherwise wins the cascade. */
+.accentAvatar {
+  background-color: var(--sv-color-accent) !important;
+  border-color: var(--sv-color-accent) !important;
+  color: var(--sv-color-text-on-accent) !important;
+}
+
+/* --- Account dropdown (Popover children) — mirrors the platform shell's own
+   AccountMenu.module.css 1:1 (same semantic tokens, same layout), since this
+   plugin can't import that component directly (see `TravellogHeader.tsx`'s
+   doc comment). ------------------------------------------------------------ */
+
+.accountMenuHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-3);
+  padding: var(--sv-space-2) var(--sv-space-3);
+}
+
+.accountMenuUserInfo {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.accountMenuName {
+  margin: 0;
+  font-size: var(--sv-font-size-sm);
+  font-weight: var(--sv-font-weight-semibold);
+  color: var(--sv-color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.accountMenuEmail {
+  margin: 1px 0 0;
+  font-size: var(--sv-font-size-caption);
+  color: var(--sv-color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.accountMenuDivider {
+  margin: var(--sv-space-1) 0;
+  border: none;
+  border-top: 1px solid var(--sv-color-border);
+}
+
+.accountMenuItem {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-2);
+  width: 100%;
+  min-height: var(--sv-touch-target-min, 44px);
+  padding: var(--sv-space-2) var(--sv-space-3);
+  border: none;
+  border-radius: var(--sv-radius-sm);
+  background: transparent;
+  color: var(--sv-color-text-primary);
+  font: inherit;
+  font-size: var(--sv-font-size-sm);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .accountMenuItem:hover {
+    background: var(--sv-color-surface-sunken);
+  }
+}
+
+.accountMenuItem:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: -2px;
+}
+
+.accountMenuItemDestructive {
+  color: var(--sv-color-error-text);
+}
+
+@media (hover: hover) {
+  .accountMenuItemDestructive:hover {
+    background: var(--sv-color-error-surface);
+  }
+}
+
+/* --- Apps popover (Popover children) ----------------------------------- */
+
+.appsPopoverHeader {
+  padding: var(--sv-space-4) var(--sv-space-3) var(--sv-space-1);
+  font-size: var(--sv-font-size-sm);
+  font-weight: var(--sv-font-weight-semibold);
+  color: var(--sv-color-text-primary);
+}
+
+.appsPopoverLoading {
+  display: flex;
+  justify-content: center;
+  padding: var(--sv-space-6);
+}
+
+.appsPopoverError {
+  padding: 0 var(--sv-space-3) var(--sv-space-3);
+}
+
+.appsGrid {
+  display: grid;
+  /* `minmax(0, 1fr)`, not a plain `1fr` — a plain `1fr` track can grow past
+     the grid's own available width to fit an item's min-content size, and
+     `.appTileName`'s `white-space: nowrap` makes that min-content size the
+     full unwrapped text width; `minmax(0, ...)` caps the track back to the
+     grid's real width so the ellipsis rule can actually engage. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sv-space-1);
+  padding: var(--sv-space-2);
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.appTile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sv-space-2);
+  padding: var(--sv-space-2);
+  border-radius: var(--sv-radius-md);
+  text-decoration: none;
+  color: var(--sv-color-text-primary);
+  text-align: center;
+}
+
+@media (hover: hover) {
+  .appTile:hover {
+    background: var(--sv-color-surface-sunken);
+  }
+}
+
+.appTileIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--sv-radius-md);
+  background: var(--sv-color-surface-sunken);
+  font-size: var(--sv-font-size-xs);
+  font-weight: var(--sv-font-weight-semibold);
+  overflow: hidden;
+}
+
+.appTileIconImg {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+}
+
+.appTileName {
+  font-size: var(--sv-font-size-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.formError {
+  color: var(--sv-color-error-text);
+  font-size: var(--sv-font-size-sm);
+  margin: 0;
+}
+
 /* --- Error boundary (app/error.tsx) ------------------------------------ */
 
 .centered {

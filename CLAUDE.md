@@ -154,7 +154,7 @@ Don't invent detail here ahead of its own pass — flag it and ask instead:
 
 ## Status
 
-Current manifest version: `0.26.0` (`T.1`–`T.24` shipped — Slice 1 web is
+Current manifest version: `0.27.0` (`T.1`–`T.24` plus `T.5a` shipped — Slice 1 web is
 feature-complete; Slice 2 (web) is ship-ready per its own review checklist
 — data model, server layer, auto-link engine, Trips, and the whole Planner
 all exist, audited live against `CONCEPT.md` in `T.17`, which also closed
@@ -199,8 +199,19 @@ on request rather than by default: `visit.note` reclassified via
 `portability.ts`/`seed.ts` now runs through `sdk.crypto.seal()`/`open()`,
 and both halves of its review checklist were live-verified against a real
 `SOVEREIGN_FIELD_KEK` (genuine ciphertext at rest with the class enabled;
-unchanged behavior with it unset). That completes Phase 1d, and with it the
-entire phase 1 concept — every task in `CONCEPT.md`'s phase 1 scope, web
-and mobile data layer alike, has now shipped. Task history and the
-reasoning behind every completed task lives in `SPEC.md`'s `Status` section — that's the changelog;
-don't duplicate it here.
+unchanged behavior with it unset). That completed Phase 1d. `T.5a` (app
+switcher & account menu chrome) followed — the last piece of the header
+deferred since `T.5`, a `[parallel]` task with no downstream dependents
+that had simply never come back up until picked up on request: `AppsMenu`
+and `TravellogAccountMenu`, direct copies of `sovereign-plugin-kanban`'s
+own, wired into `TravellogHeader`'s previously-empty right side. Live-
+verified the apps popover (lists installed apps, hides Console for a
+non-admin, independently confirmed via a direct `/console` 403 on the same
+account) and the account menu (real signed-in user, working sign-out); the
+admin-tile-shown branch rests on code identity with Kanban's/Docs' own
+already-shipped `AppsMenu` rather than a live check, since granting a
+second live account admin access safely wasn't possible against this
+shared dev database. That's every task in `CONCEPT.md`'s phase 1 scope,
+web and mobile data layer alike, now shipped — phase 1 is complete. Task
+history and the reasoning behind every completed task lives in `SPEC.md`'s
+`Status` section — that's the changelog; don't duplicate it here.

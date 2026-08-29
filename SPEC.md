@@ -7,15 +7,75 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.24` shipped, manifest at `0.26.0` (`T.5a`, slot
-`0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block
-`T.6`–`T.24`). Phase 1a–1c (Slices 1–3) are complete and hardened. Phase 1d
-is now fully done: `T.23` (Sovereign portability hooks — export/import/
+✅ Phase 1 complete — `T.1`–`T.24` plus `T.5a` have all shipped, manifest at
+`0.27.0`. Phase 1a–1c (Slices 1–3) were complete and hardened first; Phase
+1d closed it out: `T.23` (Sovereign portability hooks — export/import/
 delete) shipped first, live-verified end to end including a byte-exact
 photo round-trip; `T.24` (optional field encryption for `visit.note`)
-followed, picked up on request rather than by default. That closes out the
-entire phase 1 concept — every task in `CONCEPT.md`'s phase 1 scope, web
-and mobile data layer alike, is now shipped.
+followed, picked up on request rather than by default. `T.5a` (app switcher
+& account menu chrome) was the very last piece — a `[parallel]` task
+deferred since `T.5` with nothing ever forcing it, finally picked up on
+request at slot `0.27.0`, well after everything it was originally
+scheduled alongside. Every task in `CONCEPT.md`'s phase 1 scope, web and
+mobile data layer alike, is now shipped — see "Deferred, not yet planned"
+in `CONCEPT.md` and `ROADMAP.md`'s own notes for what's genuinely next.
+
+**`T.5a` — App switcher & account menu chrome (`0.27.0`).** Completed the
+right half of `TravellogHeader` deferred since `T.5`: an `AppsMenu` popover
+(installed-apps grid fetched from `GET /api/plugins`, static Home tile,
+admin-capability-gated Console tile) and `TravellogAccountMenu` (avatar,
+name/email, Account/Preferences links, Sign out) — both direct copies of
+`sovereign-plugin-kanban`'s `AppsMenu.tsx`/`KanbanAccountMenu.tsx` (verified
+byte-for-byte identical to `sovereign-plugin-docs`'s own copies before
+porting, confirming the "direct copy" deliverable text was accurate), with
+only the CSS-module import path and doc-comment cross-references adapted.
+`TravellogHeader` itself picked up `'use client'` (needed the moment it
+renders these two stateful popovers) and a `headerRight` div; `layout.tsx`
+now computes `session`/`isAdmin` (`sdk.auth.getSession()` +
+`sdk.auth.hasCapability(session, 'console:access')`, the same pattern
+`KanbanLayout` already uses) and threads `user`/`isAdmin` down — mirroring
+`KanbanLayout`'s own wiring exactly, minus the mobile-header/-footer half
+Kanban also has, since Travellog has no mobile UI yet (a separate,
+not-yet-started concept-review pass per `CONCEPT.md`). Roughly 20 CSS
+classes ported from `kanban.module.css` verbatim (semantic tokens only, no
+plugin-specific values) — deliberately *not* porting Kanban's own
+`@media (max-width: 768px) { .header { display: none; } }` rule, since
+Kanban hides its desktop header behind a real `KanbanMobileHeader`
+counterpart and Travellog has none; copying that rule as-is would have left
+mobile visitors with zero header at all, no way back to Launcher.
+
+Live-verified in an isolated `git worktree` (the shared checkout was again
+mid-flight on an unrelated branch): the apps popover correctly listed
+installed apps (Home, Travellog, Warden) and hid the Console tile; hiding
+was independently confirmed as a real authorization boundary, not a
+coincidence, by separately hitting `/console` directly on the same account
+and getting the platform's own "you don't have access to this" denial. The
+account menu showed the actual signed-in user (name, email, matching
+avatar initials) and Sign out worked — a real redirect to the login screen
+with "You've been signed out." **The admin-tile-shown branch was not
+independently live-verified.** `sv seed`'s known-password test accounts
+(`docs/self-hosting.md`-adjacent `CONTRIBUTING.md` convention) refused to
+run — correctly — against this shared dev database, which already has six
+real user accounts (a deliberate safety guard against ever creating a
+well-known-password backdoor on a database with real users), and no
+existing account's admin status/credentials were available to test with
+directly. Confidence in that branch rests on code identity instead: the
+`{isAdmin && (...)}` conditional is a byte-for-byte copy of Kanban's/Docs'
+own already-shipped, already-proven `AppsMenu`, and `isAdmin` is computed
+via the same `hasCapability` call already exercised elsewhere in the
+platform — not a new code path this task introduced.
+
+**A ROADMAP.md renumbering, not just a checkbox flip.** `T.5a`'s
+originally-reserved slot (`0.7.0`, from the roadmap's own "third pass" when
+the task was first split out of `T.5`) was never actually tagged in
+`manifest.json`'s real history — every task from `T.6` through `T.24`
+landed in strict sequence while `T.5a` sat deferred, so `0.7.0` doesn't
+exist as a real shipped version. Its row moved out of Phase 1a into Phase
+1d at `0.27.0`, its real landing slot; `ROADMAP.md`'s own prioritization
+rationale for `T.5a` (which predicted it "won't drift to the end") was
+corrected to admit it did, with the lesson stated plainly: a `[parallel]`
+task with zero downstream dependents has no forcing function and can sit
+indefinitely without someone deliberately picking it back up.
 
 **`T.24` — App-level field encryption for `visit.note` (RFC 0092)
 (`0.26.0`).** `visit.note` reclassified `encryptedText('note', {
