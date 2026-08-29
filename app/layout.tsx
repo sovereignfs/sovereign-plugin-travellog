@@ -3,6 +3,7 @@ import { sdk } from '@sovereignfs/sdk';
 import { ToastProvider } from '@sovereignfs/ui';
 import { OfflineSyncBoundary } from './_components/OfflineSyncBoundary';
 import { TravellogHeader } from './_components/TravellogHeader';
+import { registerPortabilityHandlers } from './_lib/portability';
 import styles from './travellog.module.css';
 
 /**
@@ -17,6 +18,16 @@ import styles from './travellog.module.css';
  * Structure matches both of those plugins' own root `layout.tsx` directly.
  */
 export default async function TravellogLayout({ children }: { children: ReactNode }) {
+  // In-process and reset on restart — the platform SDK requires
+  // re-registering from a request-scoped plugin route, so this runs on
+  // every request. Best-effort: a registration failure must not block the
+  // plugin's own UI (matches sovereign-plugin-docs' identical pattern).
+  try {
+    await registerPortabilityHandlers();
+  } catch {
+    // Portability is a best-effort platform integration.
+  }
+
   // Best-effort: the header's brand badge is cosmetic, not core
   // functionality, so a platform-config read failure shouldn't take down
   // the whole plugin.

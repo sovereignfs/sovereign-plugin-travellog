@@ -154,7 +154,7 @@ Don't invent detail here ahead of its own pass — flag it and ask instead:
 
 ## Status
 
-Current manifest version: `0.24.0` (`T.1`–`T.22` shipped — Slice 1 web is
+Current manifest version: `0.25.0` (`T.1`–`T.23` shipped — Slice 1 web is
 feature-complete; Slice 2 (web) is ship-ready per its own review checklist
 — data model, server layer, auto-link engine, Trips, and the whole Planner
 all exist, audited live against `CONCEPT.md` in `T.17`, which also closed
@@ -183,8 +183,17 @@ one real account — check in, build history, plan a trip spanning today,
 auto-link an unplanned check-in into it, open Trip Mode via the just-fixed
 CTA, confirm status transitions. The full phase 1 concept (web
 Trips/Check-ins/Planner plus the mobile check-in/Trip Mode data layer) is
-now complete. `T.23`/`T.24` (Sovereign portability hooks, optional field
-encryption — Phase 1d) remain, picked up on request rather than by
-default. Task history and the reasoning behind every completed task lives
-in `SPEC.md`'s `Status` section — that's the changelog; don't duplicate it
-here.
+now complete. `T.23` (Sovereign portability hooks) followed: `sdk.portability`
+export/import/delete across every `travellog_*` table (`travellog_import_jobs`
+deliberately excluded — instance-local resume state, not portable), live-
+verified end to end including a byte-exact photo round-trip. Found and fixed
+two real bugs along the way — one platform-level (`sdk.storage` calls from a
+portability resolver always resolved `userId: null`, denying reads of any
+user-owned object; fixed in `sovereignfs/sovereign` PR #550, merged), one in
+this plugin's own import code (a re-import onto a non-empty account could hit
+`travellog_visits`' unique constraint and abort the whole request; fixed with
+a per-visit dedup check plus wrapping the import in one transaction). `T.24`
+(optional field encryption — the rest of Phase 1d) remains, picked up on
+request rather than by default. Task history and the reasoning behind every
+completed task lives in `SPEC.md`'s `Status` section — that's the changelog;
+don't duplicate it here.

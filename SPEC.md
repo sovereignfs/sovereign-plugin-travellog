@@ -7,15 +7,167 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.22` shipped, manifest at `0.24.0` (`T.5a`, slot
+🚧 In progress — `T.1`–`T.23` shipped, manifest at `0.25.0` (`T.5a`, slot
 `0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block
-`T.6`–`T.22`). Slice 1 (web) is feature-complete; Slice 2 (web) is
-ship-ready; Slice 3 (Trip Mode) is fully built and hardened — the full
-phase 1 concept (web Trips/Check-ins/Planner plus the mobile check-in/Trip
-Mode data layer) is complete and live-verified end to end on one real
-account. `T.23`/`T.24` (Sovereign portability hooks, optional field
-encryption — Phase 1d) remain, picked up on request rather than by
-default.
+`T.6`–`T.23`). Phase 1a–1c (Slices 1–3) are complete and hardened. Phase 1d
+is now half-done: `T.23` (Sovereign portability hooks — export/import/
+delete) shipped, live-verified end to end including a byte-exact photo
+round-trip; `T.24` (optional field encryption) remains, picked up on
+request rather than by default.
+
+**`T.23` — Sovereign portability hooks: export/import/delete (`0.25.0`).**
+`sdk.portability.provideExport`/`provideImport`/`provideDelete`, covering
+every `travellog_*` table — `places` (scoped to those actually referenced
+by this user's own visits/stops/itinerary items, never the tenant's whole
+shared pool), `visits`, `visit_photos`, `trips`, `stops`, `trip_days`,
+`itinerary_items`, `attachments` — except `travellog_import_jobs`,
+deliberately: it tracks one Swarm-upload's resume cursor against a ZIP
+stored on *this* instance, meaningless after a cross-instance restore (a
+fresh Swarm import needs a fresh ZIP upload there anyway). Registered from
+`app/layout.tsx`, mirroring `sovereign-plugin-docs`'/`warden`'s own
+pattern exactly: best-effort `try`/`catch` (a registration failure must
+never block the plugin's own UI), re-registers on every request since the
+SDK resets registrations on restart. `data:export`/`data:import` had
+already been declared in `manifest.json` since `T.1` — `docs/plugin-
+development.md`'s own warning against exactly that ("declare only once
+you've actually registered the matching hook") applied here until now;
+this task is what finally earns it.
+
+**A real platform gap found before any of this could work at all.**
+Photos/attachments are uploaded with `ownerUserId` set (both existing
+upload routes already did this correctly); reading one back via
+`sdk.storage.get()` from inside an export resolver resolved
+`context.userId` to `null` — no request, so `storageContext()` never sees
+`x-sovereign-user-id` — and `canAccessStorageObject` denies whenever a
+stored object's `ownerUserId` is set and the reading context's `userId`
+doesn't match, including `null`. The read silently returned `null`
+instead of the object; no error surfaced anywhere. `resolveStorageContext`
+(`sdk-host.ts`) already had this exact fallback for `pluginId`
+(`getPortabilityPluginContext()`), just never for `userId` — the
+background-job/schedule sibling context genuinely never carries one
+(`JobContext` is plugin-scoped only), but a portability export/import *is*
+always user-scoped, so this one could and should have had it. Fixed in an
+isolated `git worktree` — the shared platform checkout was mid-merge on an
+unrelated branch (`docs/sync-roadmap-version-header`) with another
+session's uncommitted lockfile changes sitting on it, so working there
+directly risked corrupting that in-progress work; a worktree cut fresh
+from `origin/main` sidesteps it entirely without disturbing anything.
+Threaded `userId` through `runWithPortabilityPlugin`'s `AsyncLocalStorage`
+alongside `pluginId` (new `getPortabilityUserContext()`;
+`getPortabilityPluginContext()`'s own external signature is unchanged, so
+its four existing call sites in `sdk-host.ts` needed no changes), added
+the matching fallback to `resolveStorageContext`, and added a dedicated
+regression test (`sdk-host-storage-portability-routing.test.ts`, mirroring
+`sdk-host-storage-routing.test.ts`'s pattern for the sibling background-job
+gap) plus updated `plugin-context.test.ts` for the new
+`runWithPortabilityPlugin(pluginId, userId, fn)` signature. Full repo-wide
+check suite clean (2586 tests via the pre-push hook). Opened as
+`sovereignfs/sovereign` PR #550 (`runtime` `0.91.2`→`0.91.3`, root platform
+`0.101.4`→`0.101.5` — an ad-hoc fix between roadmap tasks, this repo's own
+convention) — merged before this task's own live verification finished; any
+further platform-side change would need its own separate PR, not more
+commits onto that one.
+
+**A second real bug, this time entirely in Travellog's own import code,
+found by actually running the review checklist's literal "export → delete
+→ import" flow rather than a clean-room test only.** A self-import (bundle
+exported from an account, imported back into that same, not-yet-emptied
+account — a real scenario the SDK contract never rules out, even though
+this task's checklist happens to test the empty-target case) hit
+`travellog_visits_tenant_source_external_ref_unique` head-on: a Swarm-
+imported visit's `(tenantId, source, externalRef)` collided with the copy
+already present, and the raw unique-constraint violation aborted the
+*entire* `/api/account/import` request — `restore.ts` doesn't isolate one
+plugin's import failure the way `assemble.ts` isolates export failures.
+Worse, since the import wasn't yet transactional, three failed attempts
+made while diagnosing this (before the fix) each partially committed a
+full duplicate copy of every place/trip/stop/day/item ahead of the row
+that failed, visibly inflating the dev account from 2 trips/12 places to
+32 trips/73 places. Fixed two ways: (1) a visit whose `(tenantId, source,
+externalRef)` already exists in the target is now skipped rather than
+inserted — mirroring `isVisitAlreadyImported`'s existing pre-check,
+generalized past its hardcoded `'import:swarm'` source — and its photos
+are skipped with it, rather than left pointing at a visit row that was
+never created; (2) the whole import now runs inside one `db.transaction()`,
+matching `createVisit`'s own transactional convention elsewhere in this
+plugin, so a future failure of any kind leaves zero rows behind instead of
+a partial mess. Added a regression test reproducing the exact collision
+(self-import of a visit whose `externalRef` already exists) asserting no
+duplicate is created and no orphaned photo results.
+
+**Live verification, end to end, via an isolated worktree dev server** —
+not just against mocked `sdk.storage`. Same worktree as the platform fix
+above (rebuilt with the travellog plugin copied in, since a plain symlink
+is invisible to the generator's `readdirSync(..., {withFileTypes:
+true})`-based plugin discovery — `Dirent.isDirectory()` doesn't follow
+symlinks); a real photo was uploaded through the actual check-in flow
+(browser automation can't drive a native file picker, so a `File` +
+`DataTransfer` was constructed and dispatched onto the real hidden
+`<input type="file">` directly — confirmed working by reading back
+`FileDropzone`'s own rendered label text, which updates from the same
+`onFileSelect` callback a real pick would trigger), then exported via the
+real `Account → Data` UI's `/api/account/export` route. Decoded the
+returned ZIP's `deflate-raw` entries client-side (`DecompressionStream`,
+native to the browser, no library needed) to inspect `manifest.json` and
+`data.json` directly rather than trusting only the UI's own summary.
+Confirmed byte-for-byte: the exported blob's bytes matched the originally
+uploaded photo's bytes exactly. Confirmed a photo whose storage object
+genuinely doesn't exist (found live against *pre-existing* seed data from
+this same dev account, whose physical bytes live on the **original**
+checkout's disk — `pluginStorageDir()` resolves from `findWorkspaceRoot()`,
+so a worktree's own `data/` never sees them even though the shared `sqld`
+database does) produces a graceful per-photo warning, not a crash. Import
+was verified the same way, submitting a real `FormData` `bundle` field
+directly (matching `PortabilityPanel.tsx`'s own field name — an earlier
+self-authored repro using the wrong field name had briefly looked like the
+real bug before the actual server error was captured and diagnosed
+correctly).
+
+**A real mess from live-testing was found and cleaned up before finishing.**
+The three partial-duplicate import attempts (mid-fix, described above) left
+462 duplicate rows in the shared dev `sqld` database — real state the
+*original* checkout's own dev server also reads, not something scoped to
+the disposable worktree. Removed via a temporary, worktree-local-only
+route (never committed) running the exact same deletion query shape as the
+real `deleteAllTravellogData` handler, scoped to this one test account;
+deleted immediately after confirming a clean `0` trips / `0` places state.
+The dev account (`travellog-qa@sovereign.local`) is intentionally left
+empty rather than reseeded — a clean baseline for whatever the next task
+needs, not a reconstruction attempt of the exact prior fixture data.
+Deletion itself is additionally covered by 1 unit test (shared place
+survives another user's deletion, matching the review checklist's
+"leaves the trip and its other members intact" in the one form that
+actually applies here — see below) and was exercised for real by that same
+cleanup route completing without error.
+
+**No successor-ownership-transfer logic in the deletion handler, unlike
+`sovereign-plugin-docs`' own** — a straight per-user row sweep instead.
+Every table here has exactly one owner (`authz.ts`'s own header comment:
+"a trip has exactly one owner, same as a visit" — real shared access,
+`travellog_trip_members`, was never built, `T.10`/`T.14`), so there is no
+membership to hand off. `sdk.storage` cleanup is deliberately **not** done
+in the deletion handler either: every photo/attachment was uploaded with
+`ownerUserId` set, so the platform's own account-deletion storage sweep
+(`user-deletion.ts`'s Phase 4, RFC 0044) already removes the physical
+files generically — the same reasoning `warden`'s own deletion handler
+documents for skipping `sdk.connections`/`sdk.secrets`.
+
+8 new unit tests (`portability.test.ts`, ephemeral real SQLite DB +
+mocked `sdk.storage`/`sdk.portability` capturing the registered handlers,
+matching `import-swarm.test.ts`'s established mocking pattern): export
+scopes correctly to the calling user and parses `companions` JSON; blobs
+are included/omitted correctly per `includeFiles`; a missing storage
+object warns instead of throwing; import round-trips with remapped ids
+including re-uploaded photo bytes; a manual "no trip" override
+(`linkSource: 'manual'`, `tripId: null`) survives import instead of being
+silently reset; the externalRef-collision skip (this task's live-found
+bug); malformed/unversioned sections are rejected; deletion removes
+everything for one user while leaving another user's data and a place
+they both reference intact.
+
+Full check suite clean: `format:check`, `lint`, `typecheck`,
+`design:tokens:check` (129 tokens, no violations), and all 363 travellog
+tests (355 prior + 8 new) pass.
 
 **`T.22` — Slice 3 hardening & release pass (`0.24.0`).** Full pass against
 `CONCEPT.md`'s Slice 3 description plus a cross-slice live walkthrough, per
@@ -2730,7 +2882,7 @@ intentionally unlisted — not yet designed.
 | Sidebar nav                 | Plugin-local `TravellogSidebar`, direct copy of `sovereign-plugin-docs`'s `DocsSidebar` structure |
 | Page chrome (within a column) | `PageContainer`, `PageHeader`                                |
 | Create/confirm dialogs      | `Dialog` (`md`)                                                |
-| Trip sharing                | Plugin-local `TripShareButton`/`TripShareDialog`, direct copy of `sovereign-plugin-docs`'s `FolderShareButton`/`FolderShareDialog` pattern (`sdk.directory` search) |
+| Trip companions field        | `TagInput` — not real sharing; resolved (open question 2, `T.14`) toward an informational-only tag field, not `TripShareButton`/`FolderShareDialog`-style member access |
 | Menus (stop/day/item)       | `Menu` / `MenuEntries`                                        |
 | Quick-entry (note, search)  | `Input` + `useCommitOnEnterOrBlur`                             |
 | Status badges/chips         | `Badge`                                                         |

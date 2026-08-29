@@ -1,6 +1,6 @@
 # Sovereign Travellog — Roadmap
 
-**Manifest version:** 0.23.0 · **Last updated:** 2026-08-29
+**Manifest version:** 0.25.0 · **Last updated:** 2026-08-29
 
 Chronological build index — one row per PR, platform-`ROADMAP.md` style. Full
 task detail lives in [SPEC.md](SPEC.md); the product concept in
@@ -60,7 +60,7 @@ entry for the full account.
 
 | Slot   | Task                                                          | Status | Spec task                                                                                          |
 | ------ | ---------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------ |
-| 0.25.0 | Sovereign portability hooks (export/import/delete)            | ⬜     | [T.23](SPEC.md#t23--sovereign-portability-hooks-exportimportdelete)                                    |
+| 0.25.0 | Sovereign portability hooks (export/import/delete)            | ✅     | [T.23](SPEC.md#t23--sovereign-portability-hooks-exportimportdelete)                                    |
 | 0.26.0 | App-level field encryption for `visit.note` (RFC 0092) `[optional, deferred]` | ⬜ | [T.24](SPEC.md#t24--app-level-field-encryption-for-visitnote-rfc-0092-optional-deferred) |
 
 **Not yet slotted, deliberately** (per `CONCEPT.md`'s "Deferred, not yet
