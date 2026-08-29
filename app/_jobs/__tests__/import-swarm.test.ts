@@ -12,6 +12,7 @@ import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../_db/schema';
 import { createTestDb, type TestDb } from '../../_db/__tests__/test-db';
+import { fakeOpen, fakeRegisterTables, fakeSeal } from '../../_db/__tests__/crypto-mock';
 import { createImportJob, getImportJob, updateImportJobProgress } from '../../_lib/import-jobs';
 
 const harness = vi.hoisted(() => ({
@@ -24,6 +25,7 @@ const harness = vi.hoisted(() => ({
 vi.mock('@sovereignfs/sdk', () => ({
   sdk: {
     db: { getClient: vi.fn(async () => harness.dbClient) },
+    crypto: { seal: fakeSeal, open: fakeOpen, registerTables: fakeRegisterTables },
     storage: {
       get: vi.fn(async (key: string) => {
         const bytes = harness.storageObjects.get(key);

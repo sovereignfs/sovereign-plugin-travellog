@@ -6,6 +6,7 @@
  * (`T.4`'s review checklist).
  */
 import { and, asc, count, countDistinct, desc, eq, inArray, lt, or } from 'drizzle-orm';
+import { sdk } from '@sovereignfs/sdk';
 import type { TravellogDb } from '../_db/client';
 import * as schema from '../_db/schema';
 import type { Actor } from './authz';
@@ -121,8 +122,12 @@ export async function getVisitTimelinePage(
     db,
     rows.map((r) => r.id),
   );
+  const openedRows = (await sdk.crypto.open(
+    schema.visits,
+    rows as Record<string, unknown>[],
+  )) as unknown as typeof rows;
 
-  const items: TimelineVisit[] = rows.map((row) => ({
+  const items: TimelineVisit[] = openedRows.map((row) => ({
     id: row.id,
     happenedAt: row.happenedAt,
     tzIana: row.tzIana,
@@ -260,8 +265,12 @@ export async function getVisitDetail(
       ),
     );
 
-  const row = rows[0];
-  if (!row) return null;
+  const rawRow = rows[0];
+  if (!rawRow) return null;
+  const row = (await sdk.crypto.open(
+    schema.visits,
+    rawRow as Record<string, unknown>,
+  )) as unknown as typeof rawRow;
 
   const [photos, placeVisitCountRow] = await Promise.all([
     db

@@ -1,5 +1,16 @@
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fakeOpen, fakeRegisterTables, fakeSeal } from '../../_db/__tests__/crypto-mock';
+
+// `_lib/visits.ts`/`queries.ts` call `sdk.crypto.seal()`/`open()` directly
+// (T.24) — see `crypto-mock.ts`'s own header comment for why a real
+// (fake-envelope, not passthrough) mock matters here.
+vi.mock('@sovereignfs/sdk', () => ({
+  sdk: {
+    crypto: { seal: fakeSeal, open: fakeOpen, registerTables: fakeRegisterTables },
+  },
+}));
+
 import * as schema from '../../_db/schema';
 import { createTestDb, type TestDb } from '../../_db/__tests__/test-db';
 import { addDaysToDateKey, todayDateKey } from '../dates';

@@ -3,6 +3,7 @@ import { sdk } from '@sovereignfs/sdk';
 import { ToastProvider } from '@sovereignfs/ui';
 import { OfflineSyncBoundary } from './_components/OfflineSyncBoundary';
 import { TravellogHeader } from './_components/TravellogHeader';
+import { registerEncryptionTables } from './_lib/crypto';
 import { registerPortabilityHandlers } from './_lib/portability';
 import styles from './travellog.module.css';
 
@@ -24,8 +25,10 @@ export default async function TravellogLayout({ children }: { children: ReactNod
   // plugin's own UI (matches sovereign-plugin-docs' identical pattern).
   try {
     await registerPortabilityHandlers();
+    await registerEncryptionTables();
   } catch {
-    // Portability is a best-effort platform integration.
+    // Portability and field-encryption table registration are both
+    // best-effort platform integrations.
   }
 
   // Best-effort: the header's brand badge is cosmetic, not core

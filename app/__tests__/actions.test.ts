@@ -12,6 +12,7 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestDb, type TestDb } from '../_db/__tests__/test-db';
+import { fakeOpen, fakeRegisterTables, fakeSeal } from '../_db/__tests__/crypto-mock';
 import * as schema from '../_db/schema';
 import { createPlace } from '../_lib/places';
 import { createVisit } from '../_lib/visits';
@@ -34,6 +35,7 @@ vi.mock('@sovereignfs/sdk', () => ({
       }),
     },
     db: { getClient: vi.fn(async () => harness.dbClient) },
+    crypto: { seal: fakeSeal, open: fakeOpen, registerTables: fakeRegisterTables },
     env: { get: vi.fn(async () => null) },
     storage: {
       getSignedUrl: vi.fn(async (key: string) => {
@@ -221,7 +223,14 @@ describe('updateVisitAction / deleteVisitAction — ownership', () => {
     expect(result).toEqual({ ok: false, error: 'Check-in not found.' });
 
     const [row] = await t.db.select().from(schema.visits).where(eq(schema.visits.id, theirs.id));
-    expect(row?.note).toBe('original');
+    if (!row) throw new Error('expected the visit to still exist');
+    // Raw row is a sealed envelope — open() it to check the unchanged
+    // plaintext, same as any real caller reading this row would.
+    const opened = (await fakeOpen(schema.visits, row as unknown as Record<string, unknown>)) as Record<
+      string,
+      unknown
+    >;
+    expect(opened.note).toBe('original');
   });
 
   it('denies deleting another user’s visit — it still exists after', async () => {

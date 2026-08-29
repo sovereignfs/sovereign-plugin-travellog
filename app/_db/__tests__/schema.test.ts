@@ -8,7 +8,18 @@
  * by "migrations run clean on a fresh dev DB."
  */
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fakeOpen, fakeRegisterTables, fakeSeal } from './crypto-mock';
+
+// `seed.ts` calls `sdk.crypto.seal()` (T.24) — see `crypto-mock.ts`'s own
+// header comment for why a real (fake-envelope, not passthrough) mock
+// matters here.
+vi.mock('@sovereignfs/sdk', () => ({
+  sdk: {
+    crypto: { seal: fakeSeal, open: fakeOpen, registerTables: fakeRegisterTables },
+  },
+}));
+
 import { seedDemoData, SEED_PLACE_HOME_ID, type TravellogDb } from '../seed';
 import * as schema from '../schema';
 import { createTestDb, type TestDb } from './test-db';

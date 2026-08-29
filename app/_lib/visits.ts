@@ -4,6 +4,7 @@
  * with `requireUser()`/`requireVisitOwner()` and `ActionResult`.
  */
 import { and, eq } from 'drizzle-orm';
+import { sdk } from '@sovereignfs/sdk';
 import type { TravellogDb } from '../_db/client';
 import * as schema from '../_db/schema';
 import { computeAutoLinkForVisit } from './auto-link';
@@ -56,7 +57,7 @@ export async function createVisit(
       tzIana: input.tzIana,
     });
 
-    await tx.insert(schema.visits).values({
+    const sealed = await sdk.crypto.seal(schema.visits, {
       id,
       tenantId: actor.tenantId,
       userId: actor.userId,
@@ -74,6 +75,7 @@ export async function createVisit(
       createdAt: now,
       updatedAt: now,
     });
+    await tx.insert(schema.visits).values(sealed);
 
     let position: number | undefined;
     for (const photo of input.photos ?? []) {
@@ -91,7 +93,7 @@ export async function createVisit(
 
   const [row] = await db.select().from(schema.visits).where(eq(schema.visits.id, id));
   if (!row) throw new Error('createVisit: insert did not return a row');
-  return row;
+  return (await sdk.crypto.open(schema.visits, row as Record<string, unknown>)) as unknown as VisitRow;
 }
 
 export interface UpdateVisitInput {
@@ -114,23 +116,21 @@ export async function updateVisit(
   patch: UpdateVisitInput,
 ): Promise<VisitRow> {
   const now = Date.now();
-  await db
-    .update(schema.visits)
-    .set({
-      ...(patch.note !== undefined ? { note: patch.note } : {}),
-      ...(patch.companions !== undefined
-        ? { companions: patch.companions.length > 0 ? JSON.stringify(patch.companions) : null }
-        : {}),
-      ...(patch.happenedAt !== undefined ? { happenedAt: patch.happenedAt } : {}),
-      ...(patch.tzIana !== undefined ? { tzIana: patch.tzIana } : {}),
-      ...(patch.tzOffsetMinutes !== undefined ? { tzOffsetMinutes: patch.tzOffsetMinutes } : {}),
-      updatedAt: now,
-    })
-    .where(eq(schema.visits.id, visitId));
+  const sealed = await sdk.crypto.seal(schema.visits, {
+    ...(patch.note !== undefined ? { note: patch.note } : {}),
+    ...(patch.companions !== undefined
+      ? { companions: patch.companions.length > 0 ? JSON.stringify(patch.companions) : null }
+      : {}),
+    ...(patch.happenedAt !== undefined ? { happenedAt: patch.happenedAt } : {}),
+    ...(patch.tzIana !== undefined ? { tzIana: patch.tzIana } : {}),
+    ...(patch.tzOffsetMinutes !== undefined ? { tzOffsetMinutes: patch.tzOffsetMinutes } : {}),
+    updatedAt: now,
+  });
+  await db.update(schema.visits).set(sealed).where(eq(schema.visits.id, visitId));
 
   const [row] = await db.select().from(schema.visits).where(eq(schema.visits.id, visitId));
   if (!row) throw new Error('updateVisit: row disappeared mid-update');
-  return row;
+  return (await sdk.crypto.open(schema.visits, row as Record<string, unknown>)) as unknown as VisitRow;
 }
 
 /**
@@ -155,7 +155,7 @@ export async function setVisitTripLink(
 
   const [row] = await db.select().from(schema.visits).where(eq(schema.visits.id, visitId));
   if (!row) throw new Error('setVisitTripLink: row disappeared mid-update');
-  return row;
+  return (await sdk.crypto.open(schema.visits, row as Record<string, unknown>)) as unknown as VisitRow;
 }
 
 /** Photos cascade at the DB level (ON DELETE CASCADE) — no manual cleanup needed. */

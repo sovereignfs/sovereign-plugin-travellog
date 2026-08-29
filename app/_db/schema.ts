@@ -30,6 +30,7 @@
  * shared access; `T.14`'s spec already documents both UI branches.
  */
 import { index, integer, real, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core';
+import { encryptedText } from '@sovereignfs/sdk/drizzle';
 
 export const places = sqliteTable(
   'travellog_places',
@@ -70,7 +71,15 @@ export const visits = sqliteTable(
     happenedAt: integer('happened_at').notNull(),
     tzIana: text('tz_iana').notNull(),
     tzOffsetMinutes: integer('tz_offset_minutes').notNull(),
-    note: text('note'),
+    /**
+     * `T.24` (RFC 0092) — classified `sensitive`. Not blind-indexed: nothing
+     * in this plugin queries a check-in by note text (see SPEC.md's
+     * "Encryption posture"). Always run through `sdk.crypto.seal()` before a
+     * write and `sdk.crypto.open()` after a read — the column's own
+     * `toDriver` tripwire throws on an unsealed write, but reads need the
+     * explicit `open()` call to come back as plaintext.
+     */
+    note: encryptedText('note', { sensitivity: 'sensitive' }),
     /** JSON-encoded string[] of companion names — see SPEC.md's Data model notes. */
     companions: text('companions'),
     /**

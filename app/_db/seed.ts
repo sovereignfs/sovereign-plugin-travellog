@@ -8,6 +8,7 @@
  * seed place already exists. Same pattern as `sovereign-plugin-kanban`'s
  * `_db/seed.ts`.
  */
+import { sdk } from '@sovereignfs/sdk';
 import { eq } from 'drizzle-orm';
 import type { TravellogDb } from './client';
 import { positionAfter } from './position';
@@ -86,7 +87,7 @@ export async function seedDemoData(db: TravellogDb, ctx: SeedContext): Promise<b
   for (const [i, visit] of seedVisits.entries()) {
     const happenedAt = now - visit.daysAgo * day;
     const visitId = `seed-visit-${i}`;
-    await db.insert(schema.visits).values({
+    const sealed = await sdk.crypto.seal(schema.visits, {
       id: visitId,
       tenantId: ctx.tenantId,
       userId: ctx.userId,
@@ -99,6 +100,7 @@ export async function seedDemoData(db: TravellogDb, ctx: SeedContext): Promise<b
       createdAt: happenedAt,
       updatedAt: happenedAt,
     });
+    await db.insert(schema.visits).values(sealed);
     if (i === 0) {
       photoPosition = positionAfter(photoPosition);
       await db.insert(schema.visitPhotos).values({

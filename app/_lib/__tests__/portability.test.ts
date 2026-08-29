@@ -18,6 +18,7 @@ import type {
   PluginExportSection,
 } from '@sovereignfs/sdk';
 import { createTestDb, type TestDb } from '../../_db/__tests__/test-db';
+import { fakeOpen, fakeRegisterTables, fakeSeal } from '../../_db/__tests__/crypto-mock';
 import * as schema from '../../_db/schema';
 import { createPlace } from '../places';
 import { createTrip } from '../trips';
@@ -41,6 +42,7 @@ const captured = {
 vi.mock('@sovereignfs/sdk', () => ({
   sdk: {
     db: { getClient: vi.fn(async () => dbClient) },
+    crypto: { seal: fakeSeal, open: fakeOpen, registerTables: fakeRegisterTables },
     storage: {
       get: vi.fn(async (key: string) => {
         const stored = harness.storageObjects.get(key);
@@ -283,8 +285,17 @@ describe('importTravellogData', () => {
       .from(schema.visits)
       .where(eq(schema.visits.userId, userB.userId));
     expect(importedVisits).toHaveLength(1);
-    expect(importedVisits[0]?.tripId).toBe(importedTrips[0]?.id);
-    expect(importedVisits[0]?.note).toBe('Great view');
+    const importedVisit = importedVisits[0];
+    if (!importedVisit) throw new Error('expected an imported visit');
+    expect(importedVisit.tripId).toBe(importedTrips[0]?.id);
+    // The raw row is a sealed envelope (the import handler seal()s before
+    // insert, per crypto.ts's own docs) — open() it to check the round-tripped
+    // plaintext, the same way a real caller (e.g. getVisitDetail) would.
+    const openedVisit = (await fakeOpen(
+      schema.visits,
+      importedVisit as unknown as Record<string, unknown>,
+    )) as Record<string, unknown>;
+    expect(openedVisit.note).toBe('Great view');
 
     const importedStops = await t.travellog
       .select()

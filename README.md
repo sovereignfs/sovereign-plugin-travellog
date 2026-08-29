@@ -34,3 +34,19 @@ SV_PLUGIN_FS_SOVEREIGN_TRAVELLOG_NOMINATIM_BASE_URL=https://nominatim.example.co
 Place search never depends on this being reachable — a plugin-local search
 over your own previously-created places always runs alongside it, and
 creating a place manually (name only, no external search) always works.
+
+## Data protection
+
+A check-in's free-text note (`visit.note`) is classified `sensitive` under
+the platform's app-level field encryption (RFC 0092). If the operator has
+enabled it for that class, the note is stored as ciphertext — an operator
+with a live database connection sees an opaque envelope, not the note text.
+
+**Not covered:** coordinates, timestamps, place names, and categories stay
+plaintext — the map, auto-link engine, and search all read them directly, so
+encrypting them isn't possible without breaking those features. Only the
+note itself is classified.
+
+This is entirely operator policy, off by default, and this plugin behaves
+identically either way — see the platform's `docs/self-hosting.md`
+("Field encryption") for how to enable it instance-wide.

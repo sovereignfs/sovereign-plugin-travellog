@@ -199,7 +199,7 @@ async function exportTravellogData(ctx: ExportContext): Promise<PluginExportSect
   const { userId, tenantId } = ctx;
   const warnings: string[] = [];
 
-  const [visitRows, tripRows] = await Promise.all([
+  const [rawVisitRows, tripRows] = await Promise.all([
     db
       .select()
       .from(schema.visits)
@@ -209,6 +209,12 @@ async function exportTravellogData(ctx: ExportContext): Promise<PluginExportSect
       .from(schema.trips)
       .where(and(eq(schema.trips.tenantId, tenantId), eq(schema.trips.ownerId, userId))),
   ]);
+  // Exports are the user's own data, in plaintext — never envelopes
+  // (docs/plugin-development.md's field-encryption checklist, step 6).
+  const visitRows = (await sdk.crypto.open(
+    schema.visits,
+    rawVisitRows as Record<string, unknown>[],
+  )) as unknown as typeof rawVisitRows;
 
   const tripIds = tripRows.map((t) => t.id);
   const [stopRows, tripDayRows, itineraryItemRows, attachmentRows] = await Promise.all([
@@ -548,7 +554,10 @@ async function importTravellogData(
         skippedVisitIds.add(v.id);
         continue;
       }
-      await tx.insert(schema.visits).values({
+      // data.visits[].note is plaintext (the export resolver open()s it —
+      // see above) — seal() before this insert, same as every other write
+      // path to this column.
+      const sealed = await sdk.crypto.seal(schema.visits, {
         id: ctx.remapId(v.id),
         tenantId: ctx.tenantId,
         userId: ctx.userId,
@@ -569,6 +578,7 @@ async function importTravellogData(
         createdAt: v.createdAt,
         updatedAt: v.updatedAt,
       });
+      await tx.insert(schema.visits).values(sealed);
     }
 
     for (const p of data.visitPhotos) {

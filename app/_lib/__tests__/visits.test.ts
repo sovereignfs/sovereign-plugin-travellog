@@ -1,5 +1,16 @@
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fakeOpen, fakeRegisterTables, fakeSeal } from '../../_db/__tests__/crypto-mock';
+
+// `_lib/visits.ts` calls `sdk.crypto.seal()`/`open()` directly (T.24) — see
+// `crypto-mock.ts`'s own header comment for why a real (fake-envelope, not
+// passthrough) mock matters here.
+vi.mock('@sovereignfs/sdk', () => ({
+  sdk: {
+    crypto: { seal: fakeSeal, open: fakeOpen, registerTables: fakeRegisterTables },
+  },
+}));
+
 import * as schema from '../../_db/schema';
 import { createTestDb, type TestDb } from '../../_db/__tests__/test-db';
 import { createPlace } from '../places';
@@ -183,6 +194,63 @@ describe('updateVisit', () => {
 
     const updated = await updateVisit(t.travellog, visit.id, { companions: [] });
     expect(updated.companions).toBeNull();
+  });
+});
+
+describe('field encryption (T.24 — RFC 0092)', () => {
+  it('seals note before it reaches the database — a raw, un-open()d read is not plaintext', async () => {
+    const visit = await createVisit(t.travellog, actor, {
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+      note: 'Secret note',
+      source: 'manual',
+    });
+    expect(visit.note).toBe('Secret note');
+
+    const [row] = await t.db.select().from(schema.visits).where(eq(schema.visits.id, visit.id));
+    const found = must(row, 'visit row');
+    // A raw, un-open()'d read must not come back as plaintext — this is what
+    // would catch a regression that drops the seal() call on write. An
+    // open()-only assertion couldn't distinguish "sealed correctly" from
+    // "never sealed, open() is a no-op on already-plain text".
+    expect(found.note).not.toBe('Secret note');
+
+    const opened = (await fakeOpen(schema.visits, found as unknown as Record<string, unknown>)) as Record<
+      string,
+      unknown
+    >;
+    expect(opened.note).toBe('Secret note');
+  });
+
+  it('seals an updated note the same way', async () => {
+    const visit = await createVisit(t.travellog, actor, {
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+      source: 'manual',
+    });
+
+    await updateVisit(t.travellog, visit.id, { note: 'Updated secret' });
+
+    const [row] = await t.db.select().from(schema.visits).where(eq(schema.visits.id, visit.id));
+    expect(must(row, 'visit row').note).not.toBe('Updated secret');
+  });
+
+  it('a null note is left untouched — no envelope needed for absent data', async () => {
+    const visit = await createVisit(t.travellog, actor, {
+      placeId,
+      happenedAt: Date.now(),
+      tzIana: 'Europe/Lisbon',
+      tzOffsetMinutes: 60,
+      source: 'manual',
+    });
+    expect(visit.note).toBeNull();
+
+    const [row] = await t.db.select().from(schema.visits).where(eq(schema.visits.id, visit.id));
+    expect(must(row, 'visit row').note).toBeNull();
   });
 });
 

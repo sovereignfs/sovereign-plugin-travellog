@@ -7,13 +7,97 @@
 
 ## Status
 
-🚧 In progress — `T.1`–`T.23` shipped, manifest at `0.25.0` (`T.5a`, slot
+🚧 In progress — `T.1`–`T.24` shipped, manifest at `0.26.0` (`T.5a`, slot
 `0.7.0`, is `[parallel]` and hasn't shipped yet — it doesn't block
-`T.6`–`T.23`). Phase 1a–1c (Slices 1–3) are complete and hardened. Phase 1d
-is now half-done: `T.23` (Sovereign portability hooks — export/import/
-delete) shipped, live-verified end to end including a byte-exact photo
-round-trip; `T.24` (optional field encryption) remains, picked up on
-request rather than by default.
+`T.6`–`T.24`). Phase 1a–1c (Slices 1–3) are complete and hardened. Phase 1d
+is now fully done: `T.23` (Sovereign portability hooks — export/import/
+delete) shipped first, live-verified end to end including a byte-exact
+photo round-trip; `T.24` (optional field encryption for `visit.note`)
+followed, picked up on request rather than by default. That closes out the
+entire phase 1 concept — every task in `CONCEPT.md`'s phase 1 scope, web
+and mobile data layer alike, is now shipped.
+
+**`T.24` — App-level field encryption for `visit.note` (RFC 0092)
+(`0.26.0`).** `visit.note` reclassified `encryptedText('note', {
+sensitivity: 'sensitive' })`; every write path (`createVisit`,
+`updateVisit`, `importTravellogData`'s visit-insert loop, and the dev-only
+`seedDemoData` seed helper) now runs its insert/update values through
+`sdk.crypto.seal()` first, and every read path that returns a `VisitRow`
+(`createVisit`/`updateVisit`'s own return, `getVisitTimelinePage`,
+`getVisitDetail`, `exportTravellogData`) runs the raw row(s) through
+`sdk.crypto.open()` before handing them back — the export resolver in
+particular needed it despite already existing since `T.23`, since exports
+must be plaintext (`docs/plugin-development.md`'s field-encryption
+checklist, step 6) regardless of whether the instance has encryption
+enabled. `crypto:use` added to `manifest.json`'s permissions;
+`compatibility.minPlatformVersion` (`0.94.0`) already cleared the `>=
+0.82.0` floor. A new `app/_lib/crypto.ts` registers the one classified
+table (`registerEncryptionTables`, mirroring `example-plugins/
+example-encrypted`'s own helper exactly, including the once-per-process
+idempotency flag), called from `app/layout.tsx` alongside the existing
+portability registration, same best-effort `try`/`catch`.
+
+**A real bug in this plugin's own code, caught by the tripwire —
+`seedDemoData` (`_db/seed.ts`) wrote its one seed visit's note directly via
+a raw `db.insert()`, with no `seal()` call.** `encryptedText()`'s `toDriver`
+throws synchronously on any classified-column write that isn't a sealed
+envelope, so the moment `note` was reclassified, every test that seeds demo
+data (most of `schema.test.ts`, indirectly) started failing with exactly
+that thrown error — caught by running the full suite before writing a
+single test fix, not live. `seedDemoData` is real, non-test-only code
+(`docs/plugin-development.md`'s "the in-memory test DB, or a dev-gated
+server action" — the latter doesn't exist yet, but the function is written
+to be called from one), so this wasn't a test-only fixture bug: fixed by
+sealing its insert values the same way every other write path does, not by
+special-casing the seed helper.
+
+**Test infrastructure: a shared, realistic fake `sdk.crypto` mock, not a
+passthrough no-op.** `app/_db/__tests__/crypto-mock.ts` (`fakeSeal`/
+`fakeOpen`/`fakeRegisterTables`) wraps values in the real `svf0:` passthrough
+prefix format and reads classification off the real `getFieldColumns()` —
+deliberately not a no-op, since a no-op can't distinguish "sealed correctly"
+from "seal() forgotten entirely" and would let exactly the `seedDemoData`
+bug above slip through silently. Wired into all five test files that touch
+`_lib/visits.ts`/`queries.ts`/`portability.ts`/`schema.test.ts`'s `seed.ts`
+dependency/`actions.test.ts`/`import-swarm.test.ts` (49 pre-existing test
+failures from the newly-added `sdk.crypto` dependency, all resolved this
+way) plus two raw-row assertions in `portability.test.ts` and
+`actions.test.ts` that read a visit's `note` straight off a `db.select()` —
+now correctly `open()` the row first rather than comparing against the raw
+sealed envelope. New, purpose-built coverage in `visits.test.ts` (3 tests)
+asserts the property this task is actually about: a raw, un-`open()`'d read
+of a just-written note is *not* the plaintext (proving `seal()` ran, not
+just that the round trip happens to work), that an update seals the same
+way, and that `null` passes through untouched. Full suite: 366 tests, all
+green.
+
+**Live-verified both halves of the review checklist**, in an isolated `git
+worktree` (the shared checkout was again mid-flight on an unrelated branch)
+with its own `.env` copy so `SOVEREIGN_FIELD_KEK`/`SOVEREIGN_ENCRYPT_CLASSES`
+could be toggled without touching the real dev config — sqld is a single
+shared server regardless of which checkout's dev process talks to it
+(`packages/db/src/sqld.ts`), so no separate database setup was needed, just
+a namespaced `@libsql/client` query (`x-namespace: plugin_fs_sovereign_travellog`)
+run directly against it, bypassing the app entirely. With
+`SOVEREIGN_ENCRYPT_CLASSES=sensitive` and a real KEK set: checked in for
+real through the UI with a note containing a unique canary string; the app
+displayed the plaintext correctly, and the raw row queried directly was
+genuine `svf1:`-prefixed ciphertext with no trace of the canary substring
+anywhere in it. With the class unset (server restarted with the KEK
+removed): a second real check-in's note round-tripped correctly through
+the UI, and the raw row was the documented `svf0:` passthrough (the
+plaintext, base64-encoded — confirmed by decoding it) — identical
+functional behavior to `T.4`, as the checklist requires. One incidental,
+expected-not-a-bug finding along the way: reloading the check-ins list
+after removing the KEK while the *first* (genuinely encrypted) visit still
+existed threw `FieldEncryptionConfigError` from `getVisitTimelinePage`'s
+`open()` call — exactly correct per `docs/self-hosting.md`'s own "losing
+the KEK makes every encrypted field unreadable," not a code path this task
+needed to handle differently; worked around for testing purposes by
+deleting that row directly rather than treating it as something to fix. All
+test data (both visits and their two places) deleted from the shared dev
+database afterward via the same direct-query path; the worktree was
+removed.
 
 **`T.23` — Sovereign portability hooks: export/import/delete (`0.25.0`).**
 `sdk.portability.provideExport`/`provideImport`/`provideDelete`, covering
@@ -3534,7 +3618,11 @@ of a shared trip leaves the trip and its other members intact.
 
 ---
 
-#### T.24 — App-level field encryption for `visit.note` (RFC 0092) `[optional, deferred]`
+#### T.24 — App-level field encryption for `visit.note` (RFC 0092)
+
+_Was tagged `[optional, deferred]` — not required for phase 1 to ship,
+tracked separately. Picked up on request and shipped in `0.26.0`; see the
+Status section above for the full account._
 
 **Goal:** Let an operator who enables `SOVEREIGN_ENCRYPT_CLASSES` protect
 free-text check-in notes at the field level — addresses the research doc's

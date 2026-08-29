@@ -154,7 +154,7 @@ Don't invent detail here ahead of its own pass — flag it and ask instead:
 
 ## Status
 
-Current manifest version: `0.25.0` (`T.1`–`T.23` shipped — Slice 1 web is
+Current manifest version: `0.26.0` (`T.1`–`T.24` shipped — Slice 1 web is
 feature-complete; Slice 2 (web) is ship-ready per its own review checklist
 — data model, server layer, auto-link engine, Trips, and the whole Planner
 all exist, audited live against `CONCEPT.md` in `T.17`, which also closed
@@ -193,7 +193,14 @@ user-owned object; fixed in `sovereignfs/sovereign` PR #550, merged), one in
 this plugin's own import code (a re-import onto a non-empty account could hit
 `travellog_visits`' unique constraint and abort the whole request; fixed with
 a per-visit dedup check plus wrapping the import in one transaction). `T.24`
-(optional field encryption — the rest of Phase 1d) remains, picked up on
-request rather than by default. Task history and the reasoning behind every
-completed task lives in `SPEC.md`'s `Status` section — that's the changelog;
+(app-level field encryption for `visit.note`, RFC 0092) followed, picked up
+on request rather than by default: `visit.note` reclassified via
+`encryptedText()`, every read/write path in `_lib/visits.ts`/`queries.ts`/
+`portability.ts`/`seed.ts` now runs through `sdk.crypto.seal()`/`open()`,
+and both halves of its review checklist were live-verified against a real
+`SOVEREIGN_FIELD_KEK` (genuine ciphertext at rest with the class enabled;
+unchanged behavior with it unset). That completes Phase 1d, and with it the
+entire phase 1 concept — every task in `CONCEPT.md`'s phase 1 scope, web
+and mobile data layer alike, has now shipped. Task history and the
+reasoning behind every completed task lives in `SPEC.md`'s `Status` section — that's the changelog;
 don't duplicate it here.
