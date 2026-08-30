@@ -20,6 +20,22 @@ function monogram(name: string): string {
   return (second ? first.charAt(0) + second.charAt(0) : first.slice(0, 2)).toUpperCase();
 }
 
+// Module-scoped and shared by every instance mounted this page load (only
+// ever one, but matches `runtime`'s own `sidebar-hydration.ts`
+// `hydrateSidebarOnce` dedup exactly) so a re-render never re-fires the
+// fetch. Reads only `.isAdmin` from the response — `.plugins` is a
+// differently-scoped list (sidebar selection/ordering) than what this
+// popover's own `GET /api/plugins` fetch below renders.
+let adminHydrationPromise: Promise<boolean> | null = null;
+
+function hydrateIsAdminOnce(): Promise<boolean> {
+  adminHydrationPromise ??= fetch('/api/plugins/sidebar')
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data: { isAdmin?: boolean } | null) => data?.isAdmin ?? false)
+    .catch(() => false);
+  return adminHydrationPromise;
+}
+
 /**
  * Apps switcher this plugin's own top bar opens in place of the platform
  * sidebar's Apps grid — `shell: minimal` gets none of the platform's chrome
@@ -28,7 +44,7 @@ function monogram(name: string): string {
  * first. A floating popover anchored to its own trigger, not a full centered
  * modal — this is a quick jump-to-another-app switcher, not a page the user
  * reads through. Mirrors Kanban's own `AppsMenu` (`plugins/sovereign-plugin-
- * kanban.local`) verbatim — same data source, same layout.
+ * kanban.local`) structurally, but diverges on `isAdmin`: see below.
  *
  * Fetches the same session-gated, access-policy-filtered route the
  * platform's own Launcher grid renders from (`GET /api/plugins`), rather
@@ -42,13 +58,29 @@ function monogram(name: string): string {
  *
  * "Home" and (admin-only) "Console" are two static tiles ahead of the
  * fetched list, not part of `/api/plugins`'s response — neither is a real
- * listable plugin the way the rest of the grid's tiles are. `isAdmin` is
- * computed server-side in `layout.tsx` (`sdk.auth.hasCapability`) and
- * threaded down through `TravellogHeader`.
+ * listable plugin the way the rest of the grid's tiles are. Unlike Kanban
+ * (not offline-capable, so its `layout.tsx` can compute `isAdmin` server-side
+ * and pass it down as a prop), this plugin is `offline: 'offline-first'` —
+ * `app/layout.tsx` renders no per-user identity at all (its own doc comment
+ * explains why), so this component hydrates its own admin status
+ * client-side on mount via `GET /api/plugins/sidebar` (the same endpoint
+ * `runtime`'s own `sidebar-hydration.ts` uses for the identical problem),
+ * defaulting to hidden until that resolves.
  */
-export function AppsMenu({ isAdmin }: { isAdmin: boolean }) {
+export function AppsMenu() {
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<State>({ status: 'loading' });
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    hydrateIsAdminOnce().then((result) => {
+      if (!cancelled) setIsAdmin(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;

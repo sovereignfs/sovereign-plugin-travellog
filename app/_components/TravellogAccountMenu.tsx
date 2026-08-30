@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { Avatar, Icon, Popover } from '@sovereignfs/ui';
 import styles from '../travellog.module.css';
 
@@ -10,6 +10,27 @@ export interface TravellogAccountMenuUser {
   image: string | null;
 }
 
+// Module-scoped and shared by every instance mounted this page load (there's
+// only ever one, but this matches the platform's own `AccountMenu.tsx`
+// `hydrateSessionOnce` dedup exactly) so a re-render never re-fires the fetch.
+let sessionHydrationPromise: Promise<TravellogAccountMenuUser | null> | null = null;
+
+function hydrateSessionOnce(): Promise<TravellogAccountMenuUser | null> {
+  sessionHydrationPromise ??= fetch('/api/auth/get-session')
+    .then((res) => (res.ok ? res.json() : null))
+    .then((data) =>
+      data?.user
+        ? {
+            name: (data.user.name as string | null) ?? null,
+            email: (data.user.email as string | undefined) ?? '',
+            image: (data.user.image as string | null) ?? null,
+          }
+        : null,
+    )
+    .catch(() => null);
+  return sessionHydrationPromise;
+}
+
 /**
  * The account avatar + dropdown, rendered by `TravellogHeader`. Rebuilt from
  * DS primitives (`Popover`, `Avatar`, `Icon`) because the real platform
@@ -17,22 +38,33 @@ export interface TravellogAccountMenuUser {
  * user header (avatar + name + email), Account/Preferences links, then a
  * destructive Sign out posting to the platform's own `/api/account/logout`
  * route. Mirrors Kanban's own `KanbanAccountMenu` (`plugins/sovereign-plugin-
- * kanban.local`) verbatim.
- *
- * Account/Preferences are plain `<a>` tags, not `next/link`'s `Link` — those
- * routes live under the platform's own `(platform)` root layout, a different
- * one than this plugin's `(minimal)` root, and `/account` in particular is an
- * intercepting route with no parallel slot reachable across that boundary.
+ * kanban.local`) structurally, but diverges on identity: Kanban isn't
+ * offline-capable, so it can take `user` straight from its own SSR layout.
+ * This plugin is `offline: 'offline-first'`, so `app/layout.tsx` renders no
+ * per-user identity at all (its own doc comment explains why) — this
+ * component instead fetches `/api/auth/get-session` client-side on mount,
+ * exactly like `runtime/app/(platform)/_components/AccountMenu.tsx`'s
+ * `hydrateUser`/`hydrateSessionOnce`: a real, live, never-cached network
+ * round trip, restoring the real signed-in user's name/email/avatar for
+ * whoever is actually looking at the screen right now, without ever baking
+ * one user's identity into a document a service worker might precache and
+ * later replay to someone else on a shared device.
  */
-export function TravellogAccountMenu({
-  user,
-  avatarSize = 'md',
-}: {
-  user: TravellogAccountMenuUser;
-  avatarSize?: 'sm' | 'md' | 'lg';
-}) {
+export function TravellogAccountMenu({ avatarSize = 'md' }: { avatarSize?: 'sm' | 'md' | 'lg' }) {
   const [open, setOpen] = useState(false);
-  const displayName = user.name ?? user.email;
+  const [user, setUser] = useState<TravellogAccountMenuUser | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    hydrateSessionOnce().then((result) => {
+      if (!cancelled && result) setUser(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const displayName = user?.name ?? user?.email ?? '';
 
   function handleSignOut(event: FormEvent<HTMLFormElement>) {
     // Native, non-React submit (matches the platform's own AccountMenu) so it
@@ -58,7 +90,7 @@ export function TravellogAccountMenu({
         >
           <Avatar
             name={displayName}
-            src={user.image ?? undefined}
+            src={user?.image ?? undefined}
             size={avatarSize}
             className={styles.accentAvatar}
           />
@@ -69,13 +101,13 @@ export function TravellogAccountMenu({
         <div className={styles.accountMenuHeader}>
           <Avatar
             name={displayName}
-            src={user.image ?? undefined}
+            src={user?.image ?? undefined}
             size="lg"
             className={styles.accentAvatar}
           />
           <div className={styles.accountMenuUserInfo}>
-            {user.name && <p className={styles.accountMenuName}>{user.name}</p>}
-            <p className={styles.accountMenuEmail}>{user.email}</p>
+            {user?.name && <p className={styles.accountMenuName}>{user.name}</p>}
+            {user?.email && <p className={styles.accountMenuEmail}>{user.email}</p>}
           </div>
         </div>
         <hr className={styles.accountMenuDivider} />

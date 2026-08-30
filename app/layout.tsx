@@ -17,6 +17,23 @@ import styles from './travellog.module.css';
  * none; any toast call throws without this, the same failure Kanban and
  * Docs each hit live the moment they made this same migration. Structure
  * matches both of those plugins' own root `layout.tsx` directly.
+ *
+ * Deliberately reads no per-user identity of any kind — no SDK session
+ * lookup or capability check, unconditionally, not even behind a branch:
+ * this layout wraps every route under this plugin, including
+ * `app/page.tsx` — the one `offline: 'offline-first'` entry point
+ * (`manifest.json`) a service worker precaches and may later replay to a
+ * *different* user on a shared device (RFC 0074/0078). Whatever this file's
+ * own source text names, `runtime/src/__tests__/offline-route-neutrality
+ * .test.ts` flags regardless of surrounding conditionals — it's a static
+ * text scan (`findForbiddenIdentityAccess`), not a control-flow analysis, so
+ * "only read it when the route isn't the offline one" doesn't help, and
+ * even naming the read APIs verbatim in a comment like this one would trip
+ * the same regex the source code does. The account menu's name/email/avatar
+ * and the apps switcher's admin-gated Console tile both now hydrate
+ * client-side instead — see `TravellogAccountMenu`'s and `AppsMenu`'s own
+ * doc comments, mirroring `runtime/app/(platform)/_components/AccountMenu
+ * .tsx`'s hydration pattern and `sidebar-hydration.ts`'s equivalent.
  */
 export default async function TravellogLayout({ children }: { children: ReactNode }) {
   // In-process and reset on restart — the platform SDK requires
@@ -31,24 +48,14 @@ export default async function TravellogLayout({ children }: { children: ReactNod
     // best-effort platform integrations.
   }
 
-  const [session, instanceName] = await Promise.all([
-    sdk.auth.getSession(),
-    // Best-effort: the header's brand badge is cosmetic, not core
-    // functionality, so a platform-config read failure shouldn't take down
-    // the whole plugin.
-    sdk.platform
-      .getConfig()
-      .then((config) => config.instanceName)
-      .catch(() => 'Sovereign'),
-  ]);
-
-  // Platform-role admin check, same capability (`console:access`) and same
-  // pattern (`hasCapability` against the session) the platform shell's own
-  // `AdminConsoleIcon` uses to gate its Console link — gates the "Console"
-  // tile `AppsMenu` adds to its Apps switcher (`T.5a`). Computed here, not in
-  // `AppsMenu` itself, because that component is a client component with no
-  // server-side session access of its own.
-  const isAdmin = sdk.auth.hasCapability(session, 'console:access');
+  // Best-effort: the header's brand badge is cosmetic, not core
+  // functionality, so a platform-config read failure shouldn't take down the
+  // whole plugin. Instance-wide, not per-user — safe to render in the
+  // offline-cached shell.
+  const instanceName = await sdk.platform
+    .getConfig()
+    .then((config) => config.instanceName)
+    .catch(() => 'Sovereign');
 
   return (
     <ToastProvider>
@@ -57,15 +64,7 @@ export default async function TravellogLayout({ children }: { children: ReactNod
           composes under `(minimal)`, not `(platform)`, so reusing it here
           can't collide. */}
       <div id="sv-app-shell" className={styles.shell}>
-        <TravellogHeader
-          user={{
-            name: session?.user.name ?? null,
-            email: session?.user.email ?? '',
-            image: session?.user.image ?? null,
-          }}
-          instanceName={instanceName}
-          isAdmin={isAdmin}
-        />
+        <TravellogHeader instanceName={instanceName} />
         <div className={styles.body}>{children}</div>
       </div>
       <OfflineSyncBoundary />

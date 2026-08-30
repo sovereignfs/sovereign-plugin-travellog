@@ -3,9 +3,7 @@
 import Link from 'next/link';
 import styles from '../travellog.module.css';
 import { AppsMenu } from './AppsMenu';
-import { TravellogAccountMenu, type TravellogAccountMenuUser } from './TravellogAccountMenu';
-
-export type TravellogHeaderUser = TravellogAccountMenuUser;
+import { TravellogAccountMenu } from './TravellogAccountMenu';
 
 /**
  * Web-only top bar, rendered on every plugin page via the root layout.
@@ -24,16 +22,15 @@ export type TravellogHeaderUser = TravellogAccountMenuUser;
  * `CONCEPT.md`'s "Deferred, not yet planned", so this header is not hidden
  * below any breakpoint — it stays the only chrome on every viewport width
  * until a mobile-specific header exists to take over below it.
+ *
+ * Takes no `user`/`isAdmin` props (unlike Kanban's/Docs' identical headers):
+ * this plugin is `offline: 'offline-first'` and the root layout that renders
+ * this component wraps the offline-cached bare route too, so it must never
+ * compute per-user identity server-side (`app/layout.tsx`'s own doc comment
+ * explains why). `AppsMenu`/`TravellogAccountMenu` each hydrate their own
+ * real identity/admin-status client-side instead.
  */
-export function TravellogHeader({
-  user,
-  instanceName,
-  isAdmin,
-}: {
-  user: TravellogHeaderUser;
-  instanceName: string;
-  isAdmin: boolean;
-}) {
+export function TravellogHeader({ instanceName }: { instanceName: string }) {
   const brandInitial = instanceName.charAt(0).toUpperCase() || 'S';
 
   return (
@@ -57,8 +54,8 @@ export function TravellogHeader({
       </div>
 
       <div className={styles.headerRight}>
-        <AppsMenu isAdmin={isAdmin} />
-        <TravellogAccountMenu user={user} avatarSize="md" />
+        <AppsMenu />
+        <TravellogAccountMenu avatarSize="md" />
       </div>
     </header>
   );
