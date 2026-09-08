@@ -15,7 +15,7 @@
  * DB row — it never touches `sdk.storage`, so it stays trivially testable
  * against a plain ephemeral DB like every other data-layer function here.
  */
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray, or } from 'drizzle-orm';
 import type { TravellogDb } from '../_db/client';
 import * as schema from '../_db/schema';
 import { newId } from './ids';
@@ -35,10 +35,10 @@ export class InvalidAttachmentTargetError extends Error {
   }
 }
 
-/** Throws unless exactly one of `tripId`/`tripDayId` is a non-null id. */
+/** Throws unless exactly one of `tripId`/`tripDayId` is a non-empty id — `''` counts as absent, the same way the upload route reads its form fields. */
 export function validateAttachmentTarget(target: AttachmentTarget): void {
-  const hasTripId = target.tripId != null;
-  const hasTripDayId = target.tripDayId != null;
+  const hasTripId = typeof target.tripId === 'string' && target.tripId.length > 0;
+  const hasTripDayId = typeof target.tripDayId === 'string' && target.tripDayId.length > 0;
 
   if (hasTripId === hasTripDayId) {
     throw new InvalidAttachmentTargetError(
@@ -57,7 +57,7 @@ export interface CreateAttachmentInput extends AttachmentTarget {
 
 export async function createAttachment(
   db: TravellogDb,
-  actor: { userId: string },
+  actor: { userId: string; tenantId: string },
   input: CreateAttachmentInput,
 ): Promise<AttachmentRow> {
   validateAttachmentTarget(input);
@@ -66,8 +66,9 @@ export async function createAttachment(
   const now = Date.now();
   await db.insert(schema.attachments).values({
     id,
-    tripId: input.tripId ?? null,
-    tripDayId: input.tripDayId ?? null,
+    tenantId: actor.tenantId,
+    tripId: input.tripId || null,
+    tripDayId: input.tripDayId || null,
     kind: input.kind,
     title: input.title,
     storageKey: input.storageKey,
@@ -88,18 +89,62 @@ export async function createAttachment(
  * `sdk.storage` from inside a plain data-layer function: this file stays
  * testable against a bare DB, no SDK mock required.
  */
-export async function deleteAttachment(db: TravellogDb, attachmentId: string): Promise<AttachmentRow | null> {
-  const [row] = await db.select().from(schema.attachments).where(eq(schema.attachments.id, attachmentId));
+export async function deleteAttachment(
+  db: TravellogDb,
+  attachmentId: string,
+): Promise<AttachmentRow | null> {
+  const [row] = await db
+    .select()
+    .from(schema.attachments)
+    .where(eq(schema.attachments.id, attachmentId));
   if (!row) return null;
   await db.delete(schema.attachments).where(eq(schema.attachments.id, attachmentId));
   return row;
 }
 
-/** `T.17` — a trip's attachments, oldest first. The caller resolves ownership before calling this (`../actions.ts`'s own convention). */
+/**
+ * `T.17` — every attachment under a trip, oldest first: the trip-level ones
+ * *and* the day-level ones (a day attachment has `tripId: null` by the XOR
+ * rule above, so a plain `WHERE trip_id = ?` silently dropped them — the
+ * export and the detail panel both used to). The caller resolves ownership
+ * before calling this (`../actions.ts`'s own convention).
+ */
 export async function listAttachments(db: TravellogDb, tripId: string): Promise<AttachmentRow[]> {
+  const dayRows = await db
+    .select({ id: schema.tripDays.id })
+    .from(schema.tripDays)
+    .where(eq(schema.tripDays.tripId, tripId));
+  const dayIds = dayRows.map((d) => d.id);
   return db
     .select()
     .from(schema.attachments)
-    .where(eq(schema.attachments.tripId, tripId))
+    .where(
+      dayIds.length > 0
+        ? or(eq(schema.attachments.tripId, tripId), inArray(schema.attachments.tripDayId, dayIds))
+        : eq(schema.attachments.tripId, tripId),
+    )
     .orderBy(asc(schema.attachments.createdAt));
+}
+
+export type AttachmentWithDate = AttachmentRow & { date: string | null };
+
+/** `listAttachments` plus each day-level attachment's calendar date (`null` for trip-level) — what the detail panel renders. */
+export async function listAttachmentsWithDates(
+  db: TravellogDb,
+  tripId: string,
+): Promise<AttachmentWithDate[]> {
+  const rows = await listAttachments(db, tripId);
+  const dayIds = rows.map((r) => r.tripDayId).filter((id): id is string => id !== null);
+  const dates = new Map<string, string>();
+  if (dayIds.length > 0) {
+    const days = await db
+      .select({ id: schema.tripDays.id, date: schema.tripDays.date })
+      .from(schema.tripDays)
+      .where(inArray(schema.tripDays.id, dayIds));
+    for (const day of days) dates.set(day.id, day.date);
+  }
+  return rows.map((row) => ({
+    ...row,
+    date: row.tripDayId ? (dates.get(row.tripDayId) ?? null) : null,
+  }));
 }

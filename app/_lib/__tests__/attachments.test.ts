@@ -126,7 +126,7 @@ describe('listAttachments (T.17)', () => {
     expect(attachments.map((a) => a.title)).toEqual(['Flight confirmation', 'Hotel receipt']);
   });
 
-  it('never returns a day-level attachment for its trip', async () => {
+  it('includes a day-level attachment under its trip, with no trip_id of its own', async () => {
     const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
     const place = await createPlace(t.travellog, actor, { name: 'Belém Tower', source: 'manual' });
     const stop = await createStop(t.travellog, trip.id, {
@@ -143,6 +143,12 @@ describe('listAttachments (T.17)', () => {
       title: 'Day-level, not trip-level',
       storageKey: 'attachments/day.pdf',
     });
-    expect(await listAttachments(t.travellog, trip.id)).toEqual([]);
+    const listed = await listAttachments(t.travellog, trip.id);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]).toMatchObject({
+      title: 'Day-level, not trip-level',
+      tripId: null,
+      tripDayId: day.id,
+    });
   });
 });

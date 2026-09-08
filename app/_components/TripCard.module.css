@@ -7,12 +7,6 @@
   border: var(--sv-border-width-hairline) solid var(--sv-color-border);
   border-radius: var(--sv-radius-lg);
   background: var(--sv-color-surface-raised);
-  cursor: pointer;
-}
-
-.card:focus-visible {
-  outline: 2px solid var(--sv-color-focus-ring);
-  outline-offset: 2px;
 }
 
 /* The one visually "loud" card — a bolder border, matching the wireframe's
@@ -32,11 +26,35 @@
   border-width: 1.5px;
 }
 
+/* The whole card body is one real button (the select target); the CTA below it is a sibling. */
+.selectTarget {
+  all: unset;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sv-space-2);
+  width: 100%;
+  cursor: pointer;
+  border-radius: var(--sv-radius-md);
+}
+
+.selectTarget:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 4px;
+}
+
 .name {
   margin: 0;
   font-size: var(--sv-font-size-lg);
   font-weight: 600;
   color: var(--sv-color-text-primary);
+}
+
+.destination {
+  margin: 0;
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  color: var(--sv-color-text-subtle);
 }
 
 .meta {
@@ -45,8 +63,43 @@
   color: var(--sv-color-text-muted);
 }
 
-.cta {
+/* Link/button styled as the DS primary and ghost buttons — `Button` has no
+   link mode, and the CTA is real navigation. */
+.ctaPrimary,
+.ctaGhost {
+  display: inline-flex;
+  align-items: center;
   margin-top: var(--sv-space-2);
-  padding-left: 0;
-  padding-right: 0;
+  border-radius: var(--sv-radius-md);
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.ctaPrimary {
+  padding: var(--sv-space-2) var(--sv-space-3);
+  background: var(--sv-color-text-primary);
+  color: var(--sv-color-surface);
+}
+
+.ctaGhost {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  margin-top: var(--sv-space-2);
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+}
+
+.ctaGhost:hover {
+  text-decoration: underline;
+}
+
+.ctaPrimary:focus-visible,
+.ctaGhost:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--sv-radius-md);
 }

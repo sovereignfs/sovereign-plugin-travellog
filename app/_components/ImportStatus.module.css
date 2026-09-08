@@ -61,3 +61,15 @@
   font-size: var(--sv-font-size-sm);
   color: var(--sv-color-error-text);
 }
+
+.viewLink {
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+}
+
+.viewLink:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--sv-radius-sm);
+}

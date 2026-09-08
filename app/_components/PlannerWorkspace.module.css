@@ -33,6 +33,31 @@
   color: var(--sv-color-text-muted);
 }
 
+.stopToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sv-space-2);
+}
+
+.stopToolbarLabel {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  color: var(--sv-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backLink:focus-visible,
+.startTripMode:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--sv-radius-sm);
+}
+
 .startTripMode {
   align-self: flex-start;
   margin-top: var(--sv-space-2);

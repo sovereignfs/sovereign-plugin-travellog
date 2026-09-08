@@ -58,6 +58,31 @@ export interface PlaceProviderContext {
  */
 export const DEFAULT_NOMINATIM_BASE_URL = 'https://nominatim.openstreetmap.org';
 
+/**
+ * One OSM provider instance per base URL for the life of the process. The
+ * provider's 1-request/second politeness limiter and its response cache
+ * live in closure state — a fresh instance per action call (the previous
+ * shape) started every call with `lastRequestAt = 0` and an empty cache,
+ * so the public Nominatim usage policy was only ever honoured inside the
+ * unit test that reused one instance. Keyed by URL so an operator changing
+ * `NOMINATIM_BASE_URL` at runtime gets a matching provider, not a stale one.
+ */
+const osmProvidersByBaseUrl = new Map<string, PlaceProvider>();
+
+function osmProviderFor(baseUrl: string): PlaceProvider {
+  let provider = osmProvidersByBaseUrl.get(baseUrl);
+  if (!provider) {
+    provider = createOsmPlaceProvider({ baseUrl });
+    osmProvidersByBaseUrl.set(baseUrl, provider);
+  }
+  return provider;
+}
+
+/** Test-only: drops the memoized providers so a suite that stubs `fetch` per test doesn't inherit another test's rate-limit window or cache. */
+export function resetPlaceProviderCacheForTests(): void {
+  osmProvidersByBaseUrl.clear();
+}
+
 /** The one place a call site asks for a provider — never import a concrete one directly. */
 export async function getPlaceProvider(
   db: TravellogDb,
@@ -65,6 +90,5 @@ export async function getPlaceProvider(
 ): Promise<PlaceProvider> {
   const manual = createManualPlaceProvider(db, ctx);
   const baseUrl = (await sdk.env.get('NOMINATIM_BASE_URL')) ?? DEFAULT_NOMINATIM_BASE_URL;
-  const osm = createOsmPlaceProvider({ baseUrl });
-  return createMergedPlaceProvider(manual, osm);
+  return createMergedPlaceProvider(manual, osmProviderFor(baseUrl));
 }

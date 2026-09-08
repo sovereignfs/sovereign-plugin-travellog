@@ -1,19 +1,17 @@
-'use client';
-
-import { useRouter } from 'next/navigation';
-import { Button } from '@sovereignfs/ui';
+import Link from 'next/link';
+import styles from './ImportButton.module.css';
 
 /**
- * `PageHeader`'s `action` slot needs a click handler (`router.push`, since
- * `Button` always renders a plain `<button>` — no `asChild`/link mode), but
- * the Check-ins page itself is an `async` Server Component and can't call
- * `useRouter`. This is the whole component just to bridge that gap.
+ * `PageHeader`'s `action` slot on the Check-ins page. Real navigation, so a
+ * real link (middle-click, copy address, prefetch) styled as the DS
+ * secondary button — `Button` has no link mode, and a `router.push` on a
+ * `<button>` was the previous stand-in. Not a client component anymore:
+ * nothing here needs a hook.
  */
 export function ImportButton() {
-  const router = useRouter();
   return (
-    <Button variant="secondary" onClick={() => router.push('/travellog/checkins/import')}>
+    <Link href="/travellog/checkins/import" className={styles.link}>
       Import…
-    </Button>
+    </Link>
   );
 }

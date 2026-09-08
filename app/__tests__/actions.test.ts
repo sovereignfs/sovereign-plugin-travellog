@@ -51,6 +51,7 @@ vi.mock('@sovereignfs/sdk', () => ({
 }));
 
 import * as actions from '../actions';
+import { resetPlaceProviderCacheForTests } from '../_lib/place-provider';
 
 const user1 = { tenantId: 'tenant-1', userId: 'user-1' };
 const user2 = { tenantId: 'tenant-1', userId: 'user-2' };
@@ -64,6 +65,7 @@ beforeEach(async () => {
   harness.currentUser = { id: user1.userId, tenantId: user1.tenantId };
   harness.signedUrlsByKey.clear();
   harness.deleteCalls = [];
+  resetPlaceProviderCacheForTests();
   const place = await createPlace(t.travellog, user1, { name: 'Belém Tower', source: 'manual' });
   placeId = place.id;
   vi.stubGlobal(
@@ -162,7 +164,13 @@ describe('syncOfflineCheckinAction (T.21)', () => {
 
     const rows = await t.db.select().from(schema.visits);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ userId: user1.userId, source: 'manual', externalRef: 'mutation-1' });
+    // Namespaced by user: the unique index is per tenant, so two users'
+    // devices minting the same client id must never collide.
+    expect(rows[0]).toMatchObject({
+      userId: user1.userId,
+      source: 'manual',
+      externalRef: 'user-1:mutation-1',
+    });
   });
 
   it('a replayed sync for an already-applied mutation id is a no-op, not a duplicate visit', async () => {
@@ -226,10 +234,10 @@ describe('updateVisitAction / deleteVisitAction — ownership', () => {
     if (!row) throw new Error('expected the visit to still exist');
     // Raw row is a sealed envelope — open() it to check the unchanged
     // plaintext, same as any real caller reading this row would.
-    const opened = (await fakeOpen(schema.visits, row as unknown as Record<string, unknown>)) as Record<
-      string,
-      unknown
-    >;
+    const opened = (await fakeOpen(
+      schema.visits,
+      row as unknown as Record<string, unknown>,
+    )) as Record<string, unknown>;
     expect(opened.note).toBe('original');
   });
 
@@ -245,7 +253,9 @@ describe('updateVisitAction / deleteVisitAction — ownership', () => {
     harness.currentUser = { id: user2.userId, tenantId: user2.tenantId };
     const result = await actions.deleteVisitAction(theirs.id);
     expect(result).toEqual({ ok: false, error: 'Check-in not found.' });
-    expect(await t.db.select().from(schema.visits).where(eq(schema.visits.id, theirs.id))).toHaveLength(1);
+    expect(
+      await t.db.select().from(schema.visits).where(eq(schema.visits.id, theirs.id)),
+    ).toHaveLength(1);
   });
 
   it('the owner can update and delete their own visit', async () => {
@@ -265,7 +275,9 @@ describe('updateVisitAction / deleteVisitAction — ownership', () => {
       ok: true,
       message: 'Check-in deleted.',
     });
-    expect(await t.db.select().from(schema.visits).where(eq(schema.visits.id, mine.id))).toHaveLength(0);
+    expect(
+      await t.db.select().from(schema.visits).where(eq(schema.visits.id, mine.id)),
+    ).toHaveLength(0);
   });
 });
 
@@ -280,10 +292,7 @@ describe('createPlaceAction', () => {
     } as unknown as actions.CreatePlaceActionInput);
 
     expect(result.ok).toBe(true);
-    const [row] = await t.db
-      .select()
-      .from(schema.places)
-      .where(eq(schema.places.name, 'New Café'));
+    const [row] = await t.db.select().from(schema.places).where(eq(schema.places.name, 'New Café'));
     expect(row?.source).toBe('manual');
   });
 
@@ -360,7 +369,11 @@ describe('getVisitDetailAction', () => {
 
     const result = await actions.getVisitDetailAction(visit.id);
     expect(result?.photos).toEqual([
-      { id: expect.any(String), url: 'https://cdn.example/signed/ok', position: expect.any(Number) },
+      {
+        id: expect.any(String),
+        url: 'https://cdn.example/signed/ok',
+        position: expect.any(Number),
+      },
     ]);
   });
 
@@ -409,7 +422,10 @@ describe('createTripAction / updateTripAction / deleteTripAction', () => {
     const result = await actions.updateTripAction(created.trip.id, { name: 'Hijacked' });
     expect(result).toEqual({ ok: false, error: 'Trip not found.' });
 
-    const [row] = await t.db.select().from(schema.trips).where(eq(schema.trips.id, created.trip.id));
+    const [row] = await t.db
+      .select()
+      .from(schema.trips)
+      .where(eq(schema.trips.id, created.trip.id));
     expect(row?.name).toBe('Portugal 2026');
   });
 
@@ -420,7 +436,9 @@ describe('createTripAction / updateTripAction / deleteTripAction', () => {
     harness.currentUser = { id: user2.userId, tenantId: user2.tenantId };
     const result = await actions.deleteTripAction(created.trip.id);
     expect(result).toEqual({ ok: false, error: 'Trip not found.' });
-    expect(await t.db.select().from(schema.trips).where(eq(schema.trips.id, created.trip.id))).toHaveLength(1);
+    expect(
+      await t.db.select().from(schema.trips).where(eq(schema.trips.id, created.trip.id)),
+    ).toHaveLength(1);
   });
 
   it('the owner can update and delete their own trip', async () => {
@@ -561,7 +579,10 @@ describe('itinerary item actions', () => {
       departDate: '2026-09-01',
     });
     if (!stop.ok) throw new Error('setup failed');
-    const [day] = await t.db.select().from(schema.tripDays).where(eq(schema.tripDays.stopId, stop.stop.id));
+    const [day] = await t.db
+      .select()
+      .from(schema.tripDays)
+      .where(eq(schema.tripDays.stopId, stop.stop.id));
     if (!day) throw new Error('expected a trip day');
     return { tripId: trip.trip.id, tripDayId: day.id };
   }
@@ -615,10 +636,12 @@ describe('itinerary item actions', () => {
     if (!created.ok) throw new Error('setup failed');
 
     harness.currentUser = { id: user2.userId, tenantId: user2.tenantId };
-    expect(await actions.updateItineraryItemAction(created.item.id, { title: 'Hijacked' })).toEqual({
-      ok: false,
-      error: 'Itinerary item not found.',
-    });
+    expect(await actions.updateItineraryItemAction(created.item.id, { title: 'Hijacked' })).toEqual(
+      {
+        ok: false,
+        error: 'Itinerary item not found.',
+      },
+    );
     expect(await actions.deleteItineraryItemAction(created.item.id)).toEqual({
       ok: false,
       error: 'Itinerary item not found.',
@@ -643,7 +666,7 @@ describe('attachment actions', () => {
       tripId: trip.trip.id,
       kind: 'booking',
       title: 'Flight',
-      storageKey: 'attachments/flight.pdf',
+      storageKey: 'attachments/user-1/flight',
     });
     expect(result).toEqual({ ok: false, error: 'Trip not found.' });
     expect(await t.db.select().from(schema.attachments)).toHaveLength(0);
@@ -653,7 +676,7 @@ describe('attachment actions', () => {
     const result = await actions.createAttachmentAction({
       kind: 'other',
       title: 'Untargeted',
-      storageKey: 'attachments/x.pdf',
+      storageKey: 'attachments/user-1/x',
     });
     expect(result.ok).toBe(false);
   });
@@ -667,7 +690,7 @@ describe('attachment actions', () => {
         tripId: trip.trip.id,
         kind: 'receipt',
         title: 'Hotel receipt',
-        storageKey: 'attachments/hotel.pdf',
+        storageKey: 'attachments/user-1/hotel',
       }),
     ).toEqual({ ok: true, message: 'Attachment added.' });
 
@@ -679,7 +702,7 @@ describe('attachment actions', () => {
       message: 'Attachment deleted.',
     });
     expect(await t.db.select().from(schema.attachments)).toHaveLength(0);
-    expect(harness.deleteCalls).toEqual(['attachments/hotel.pdf']);
+    expect(harness.deleteCalls).toEqual(['attachments/user-1/hotel']);
   });
 
   it('denies deleting another user’s attachment, leaving the storage object untouched', async () => {
@@ -689,7 +712,7 @@ describe('attachment actions', () => {
       tripId: trip.trip.id,
       kind: 'receipt',
       title: 'Hotel receipt',
-      storageKey: 'attachments/hotel.pdf',
+      storageKey: 'attachments/user-1/hotel',
     });
     const [row] = await t.db.select().from(schema.attachments);
     if (!row) throw new Error('expected the attachment row to exist');
@@ -719,16 +742,16 @@ describe('getTripAttachmentsAction (T.17)', () => {
       tripId: trip.trip.id,
       kind: 'booking',
       title: 'Flight confirmation',
-      storageKey: 'attachments/flight.pdf',
+      storageKey: 'attachments/user-1/flight',
     });
     await actions.createAttachmentAction({
       tripId: trip.trip.id,
       kind: 'receipt',
       title: 'Hotel receipt',
-      storageKey: 'attachments/hotel.pdf',
+      storageKey: 'attachments/user-1/hotel',
     });
-    harness.signedUrlsByKey.set('attachments/flight.pdf', 'https://signed.example/flight.pdf');
-    harness.signedUrlsByKey.set('attachments/hotel.pdf', 'https://signed.example/hotel.pdf');
+    harness.signedUrlsByKey.set('attachments/user-1/flight', 'https://signed.example/flight.pdf');
+    harness.signedUrlsByKey.set('attachments/user-1/hotel', 'https://signed.example/hotel.pdf');
 
     const attachments = await actions.getTripAttachmentsAction(trip.trip.id);
     expect(attachments).toMatchObject([
@@ -744,7 +767,7 @@ describe('getTripAttachmentsAction (T.17)', () => {
       tripId: trip.trip.id,
       kind: 'other',
       title: 'Never actually uploaded',
-      storageKey: 'attachments/missing.pdf',
+      storageKey: 'attachments/user-1/missing',
     });
     // Deliberately never registered in `signedUrlsByKey` — `getSignedUrl` throws for it.
 
@@ -939,7 +962,11 @@ describe('getTripModeAction (T.19)', () => {
     if (!trip.ok) throw new Error('setup failed');
 
     expect(
-      await actions.getTripModeAction(trip.trip.id, Date.parse('2026-06-10T12:00:00Z'), 'Not/A_Zone'),
+      await actions.getTripModeAction(
+        trip.trip.id,
+        Date.parse('2026-06-10T12:00:00Z'),
+        'Not/A_Zone',
+      ),
     ).toBeNull();
   });
 
@@ -952,7 +979,10 @@ describe('getTripModeAction (T.19)', () => {
       departDate: '2026-06-10',
     });
     if (!stop.ok) throw new Error('setup failed');
-    const [day] = await t.db.select().from(schema.tripDays).where(eq(schema.tripDays.stopId, stop.stop.id));
+    const [day] = await t.db
+      .select()
+      .from(schema.tripDays)
+      .where(eq(schema.tripDays.stopId, stop.stop.id));
     if (!day) throw new Error('expected a trip day');
 
     await actions.createItineraryItemAction(day.id, { placeId, plannedTime: '09:00' });

@@ -20,8 +20,13 @@
 import { sdk, type ScheduleContext } from '@sovereignfs/sdk';
 import type { TravellogDb } from '../_db/client';
 import { resolveTimezoneFromCoords } from '../_lib/geo-timezone';
-import { claimReminderForItem } from '../_lib/itinerary-items';
-import { formatCountdown, listReminderCandidateStops, resolveTripModeToday } from '../_lib/trip-mode';
+import { claimReminderForItem, releaseReminderClaim } from '../_lib/itinerary-items';
+import {
+  formatCountdown,
+  listReminderCandidateStops,
+  resolveTripModeToday,
+  type ReminderCandidateStop,
+} from '../_lib/trip-mode';
 
 const REMINDER_LEAD_MINUTES = 20;
 
@@ -34,23 +39,44 @@ const REMINDER_LEAD_MINUTES = 20;
  * the platform's scheduler calls this with one argument, so `now` always
  * falls back to the real clock in production.
  */
-export default async function tripModeReminders(ctx: ScheduleContext, now: number = Date.now()): Promise<void> {
+export default async function tripModeReminders(
+  ctx: ScheduleContext,
+  now: number = Date.now(),
+): Promise<void> {
   const db = (await sdk.db.getClient()) as TravellogDb;
 
   const candidates = await listReminderCandidateStops(db, now);
 
   for (const stop of candidates) {
-    const tzIana = resolveTimezoneFromCoords(stop.placeLat, stop.placeLng);
-    if (!tzIana) continue; // No coordinates to derive a zone from — never guess (this file's own header).
+    // One candidate's failure never skips the rest of the tick — each stop
+    // is its own unit of work, and a thrown send for one traveler used to
+    // abandon every later candidate until the next minute.
+    try {
+      await remindForStop(db, stop, now, ctx);
+    } catch (err) {
+      console.error(`[travellog] Reminder tick failed for stop "${stop.stopId}":`, err);
+    }
+  }
+}
 
-    const today = await resolveTripModeToday(db, stop.stopId, now, tzIana);
-    if (!today?.nextItem || today.countdownMinutes === null) continue;
-    if (today.countdownMinutes > REMINDER_LEAD_MINUTES) continue;
+async function remindForStop(
+  db: TravellogDb,
+  stop: ReminderCandidateStop,
+  now: number,
+  ctx: ScheduleContext,
+): Promise<void> {
+  const tzIana = resolveTimezoneFromCoords(stop.placeLat, stop.placeLng);
+  if (!tzIana) return; // No coordinates to derive a zone from — never guess (this file's own header).
 
-    const claimed = await claimReminderForItem(db, today.nextItem.id, now);
-    if (!claimed) continue; // Already reminded (this tick or an earlier one) — fire once per item, not once per tick.
+  const today = await resolveTripModeToday(db, stop.stopId, now, tzIana);
+  if (!today?.nextItem || today.countdownMinutes === null) return;
+  if (today.countdownMinutes > REMINDER_LEAD_MINUTES) return;
 
-    const itemName = today.nextItem.placeName ?? today.nextItem.title ?? 'your next stop';
+  const claimed = await claimReminderForItem(db, today.nextItem.id, now);
+  if (!claimed) return; // Already reminded (this tick or an earlier one) — fire once per item, not once per tick.
+
+  const itemName = today.nextItem.placeName ?? today.nextItem.title ?? 'your next stop';
+  try {
     await sdk.notifications.send(
       {
         recipientUserId: stop.tripOwnerId,
@@ -61,5 +87,11 @@ export default async function tripModeReminders(ctx: ScheduleContext, now: numbe
       },
       ctx.headers,
     );
+  } catch (err) {
+    // The claim was taken but nothing was sent — release it so the next
+    // tick can try again, rather than the item being marked "reminded"
+    // forever after one transient notification failure.
+    await releaseReminderClaim(db, today.nextItem.id, now);
+    throw err;
   }
 }

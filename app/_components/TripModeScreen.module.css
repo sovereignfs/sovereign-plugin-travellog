@@ -25,6 +25,44 @@
   text-decoration: underline;
 }
 
+.positionButton:focus-visible,
+.handoffLink:focus-visible,
+.plannerLink:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--sv-radius-sm);
+}
+
+.nextDistance {
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-subtle);
+}
+
+.rowPast {
+  opacity: 0.55;
+}
+
+.rowPast .rowMain {
+  text-decoration: line-through;
+}
+
+.rowNotes {
+  display: block;
+  font-size: var(--sv-font-size-xs);
+  color: var(--sv-color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plannerLink {
+  display: inline-flex;
+  align-items: center;
+  margin-top: var(--sv-space-2);
+  font-size: var(--sv-font-size-sm);
+  color: var(--sv-color-text-primary);
+}
+
 .nextCard {
   display: flex;
   flex-direction: column;
@@ -114,6 +152,8 @@
 .rowMain {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
   font-size: var(--sv-font-size-sm);
   color: var(--sv-color-text-primary);
   overflow: hidden;

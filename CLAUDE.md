@@ -154,7 +154,8 @@ Don't invent detail here ahead of its own pass — flag it and ask instead:
 
 ## Status
 
-Current manifest version: `0.27.0` (`T.1`–`T.24` plus `T.5a` shipped — Slice 1 web is
+Current manifest version: `0.28.0` (`T.1`–`T.25` plus `T.5a` shipped — `T.25` is the
+review hardening pass, see `SPEC.md`'s Status entry. Slice 1 web is
 feature-complete; Slice 2 (web) is ship-ready per its own review checklist
 — data model, server layer, auto-link engine, Trips, and the whole Planner
 all exist, audited live against `CONCEPT.md` in `T.17`, which also closed

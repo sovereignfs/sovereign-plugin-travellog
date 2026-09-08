@@ -1,31 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
+import { closestCenter, DndContext, type DragEndEvent } from '@dnd-kit/core';
 import {
   arrayMove,
   horizontalListSortingStrategy,
-  sortableKeyboardCoordinates,
   SortableContext,
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { StepStrip, useToast } from '@sovereignfs/ui';
+import { GripIcon, StepStrip, useReorderSensors, useToast } from '@sovereignfs/ui';
 import { reorderStopAction } from '../actions';
 import { daysBetweenDateKeys, formatDateRange } from '../_lib/dates';
+import { plural } from '../_lib/format';
 import type { WorkspaceStop } from '../_lib/queries';
 import styles from './PlannerStopStrip.module.css';
-
-/** Matches `sovereign-plugin-kanban`'s own constant/rationale (`_lib/dndSensors.ts`): short enough that dnd-kit can still tell a plain click from a drag start, so selecting a stop by clicking still works normally. */
-const ACTIVATION_DISTANCE_PX = 6;
 
 function StopChip({
   stop,
@@ -36,46 +25,65 @@ function StopChip({
   isActive: boolean;
   onSelect: () => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: stop.id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: stop.id,
+  });
   const dayCount = daysBetweenDateKeys(stop.arriveDate, stop.departDate) + 1;
 
   return (
-    <button
-      type="button"
+    <div
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : 1,
+      }}
       className={[styles.chip, isActive ? styles.chipActive : ''].filter(Boolean).join(' ')}
-      onClick={onSelect}
-      {...attributes}
-      {...listeners}
     >
-      <div className={styles.chipName}>{stop.placeName}</div>
-      <div className={styles.chipMeta}>
-        {formatDateRange(stop.arriveDate, stop.departDate)} · {dayCount} day{dayCount === 1 ? '' : 's'}
-      </div>
-    </button>
+      {/* Two controls, not one: a plain select button, and a separate drag
+          handle carrying dnd-kit's listeners. With both on one `<button>`,
+          dnd-kit's keyboard activator swallowed Enter/Space to start a
+          drag, so a keyboard user could never *select* a stop. `data-no-dnd`
+          keeps a pointer press on the select button from lifting the chip. */}
+      <button
+        type="button"
+        className={styles.select}
+        onClick={onSelect}
+        aria-pressed={isActive}
+        aria-current={isActive ? 'true' : undefined}
+        data-no-dnd
+      >
+        <span className={styles.chipName}>{stop.placeName}</span>
+        <span className={styles.chipMeta}>
+          {formatDateRange(stop.arriveDate, stop.departDate)} · {plural(dayCount, 'day')}
+        </span>
+      </button>
+      <button
+        type="button"
+        className={styles.handle}
+        aria-label={`Reorder ${stop.placeName}`}
+        {...attributes}
+        {...listeners}
+      >
+        <GripIcon className={styles.handleIcon} />
+      </button>
+    </div>
   );
 }
 
 /**
  * `docs/adhoc/web-planner.md` screen 2's stop timeline strip — wires the DS
- * `StepStrip` (purely presentational) up to real drag-reorder, the same
- * distance-activated, handle-less `dnd-kit` pattern as
- * `sovereign-plugin-kanban`'s card drag (`CardTile.tsx`): the whole chip is
- * both the click-to-select target and the drag surface, via `useSortable`'s
- * `attributes`/`listeners` spread directly onto it.
+ * `StepStrip` (purely presentational) up to real drag-reorder through the
+ * DS `useReorderSensors` (mouse, long-press touch, keyboard — the
+ * hand-rolled `PointerSensor` it replaced never lifted a chip on touch,
+ * where the drag became a scroll) and a dedicated handle per chip.
  *
  * Optimistic reorder with rollback: `stops` is a local copy of the `stops`
  * prop (re-synced via the effect below whenever the parent's data changes,
  * e.g. after `router.refresh()`), reordered immediately via `arrayMove` on
  * drop so the chip doesn't visually snap back before the server confirms.
- * On failure, it reverts and shows a toast — matches `TripDetailPanel`'s
- * companions-edit error handling (`T.14`). On success, `onReordered` lets
- * the caller `router.refresh()` — a reorder can change *which* stop is
- * first/last by position, and `_lib/stops.ts`'s `recomputeTripDatesAndAutoLinks`
- * runs on every stop mutation including this one, so the trip's own
- * displayed date range (rendered by the parent's header, not this
- * component) can go stale without it.
+ * On failure, it reverts and shows a toast. On success, `onReordered` lets
+ * the caller `router.refresh()`.
  */
 export function PlannerStopStrip({
   tripId,
@@ -99,10 +107,7 @@ export function PlannerStopStrip({
     setStops(stopsProp);
   }, [stopsProp]);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: ACTIVATION_DISTANCE_PX } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const sensors = useReorderSensors();
 
   function handleDragEnd(event: DragEndEvent): void {
     const { active, over } = event;
@@ -130,9 +135,7 @@ export function PlannerStopStrip({
     // global mount-order counter, which SSR (always starting fresh at 0)
     // and the client (already incremented by any other DndContext mounted
     // earlier in the page's lifetime) can disagree on, producing a real
-    // (if cosmetic) hydration mismatch. Caught live via the dev error
-    // overlay, not by any check — confirmed by reading the actual React
-    // warning text before touching anything.
+    // (if cosmetic) hydration mismatch.
     <DndContext
       id="planner-stop-strip-dnd"
       sensors={sensors}

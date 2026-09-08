@@ -13,11 +13,11 @@
  * resequencing (`CONCEPT.md`'s "Future (deferred)"). This resolves the
  * plan exactly as manually ordered, nothing smarter.
  */
-import { and, asc, eq, lte, gte } from 'drizzle-orm';
+import { and, asc, desc, eq, lte, gte } from 'drizzle-orm';
 import type { TravellogDb } from '../_db/client';
 import * as schema from '../_db/schema';
 import { addDaysToDateKey } from './dates';
-import { localDateKey, localTimeOfDay } from './timezone';
+import { localDateKey, localTimeOfDay, zonedTimeToUtcMs } from './timezone';
 
 export interface TripModeItem {
   id: string;
@@ -39,15 +39,40 @@ export interface TripModeToday {
   date: string;
   /** Position order — matches the exact order `T.16`'s Planner shows, timed and untimed items interleaved. */
   items: TripModeItem[];
-  /** The first item (by position) with a `plannedTime` strictly after `nowUtcMs` — `null` if none (nothing left today, or nothing timed at all). */
+  /** The soonest timed item still ahead — the smallest `plannedTime` strictly after `nowUtcMs`, position as the tie-break; `null` if none (nothing left today, or nothing timed at all). */
   nextItem: TripModeItem | null;
   /** Whole minutes from `nowUtcMs` to `nextItem.plannedTime`, always >= 0. `null` iff `nextItem` is `null`. */
   countdownMinutes: number | null;
 }
 
-function minutesSinceMidnight(timeOfDay: string): number {
-  const [hours, minutes] = timeOfDay.split(':').map(Number);
-  return (hours ?? 0) * 60 + (minutes ?? 0);
+/**
+ * Pure — exported so `TripModeScreen` can re-derive "next" and the
+ * countdown on the client as the clock ticks, from the same item list,
+ * without a round trip. "Next" is the soonest timed item still ahead
+ * (not the first-by-position one): the day's *list* keeps the manual
+ * order, but a reminder/countdown for "what's next" has to mean the next
+ * thing in time — otherwise an item placed after a later-timed one never
+ * became next and never got its reminder. The countdown is a difference
+ * of real instants (`zonedTimeToUtcMs`), not of wall-clock minutes, so it
+ * stays correct across a DST transition day.
+ */
+export function resolveNextItem(
+  items: TripModeItem[],
+  date: string,
+  nowUtcMs: number,
+  tzIana: string,
+): { nextItem: TripModeItem | null; countdownMinutes: number | null } {
+  const nowTimeOfDay = localTimeOfDay(nowUtcMs, tzIana);
+  // Strictly after "now" — an item planned for exactly this minute has
+  // arrived, not "next".
+  let nextItem: TripModeItem | null = null;
+  for (const item of items) {
+    if (item.plannedTime === null || item.plannedTime <= nowTimeOfDay) continue;
+    if (nextItem === null || item.plannedTime < (nextItem.plannedTime ?? '')) nextItem = item;
+  }
+  if (!nextItem?.plannedTime) return { nextItem: null, countdownMinutes: null };
+  const targetMs = zonedTimeToUtcMs(date, nextItem.plannedTime, tzIana);
+  return { nextItem, countdownMinutes: Math.max(0, Math.round((targetMs - nowUtcMs) / 60_000)) };
 }
 
 /**
@@ -108,15 +133,7 @@ export async function resolveTripModeToday(
     position: row.position,
   }));
 
-  const nowTimeOfDay = localTimeOfDay(nowUtcMs, tzIana);
-  // Strictly after "now" — an item planned for exactly this minute has
-  // arrived, not "next"; scans in position order (not by nearest time),
-  // matching this file's own header: exactly as manually ordered.
-  const nextItem = items.find((item) => item.plannedTime !== null && item.plannedTime > nowTimeOfDay) ?? null;
-  const countdownMinutes = nextItem?.plannedTime
-    ? minutesSinceMidnight(nextItem.plannedTime) - minutesSinceMidnight(nowTimeOfDay)
-    : null;
-
+  const { nextItem, countdownMinutes } = resolveNextItem(items, date, nowUtcMs, tzIana);
   return { tripDayId: day.id, date, items, nextItem, countdownMinutes };
 }
 
@@ -128,14 +145,17 @@ export interface ActiveStopInfo {
 }
 
 /**
- * `T.19` — which of a trip's stops (if any) covers `dateKey`. A trip's
- * stops never overlap by construction (each is added/edited through
- * `_lib/stops.ts`'s own date validation against the others in sequence),
- * so at most one row can match — `null` when today falls before the first
- * stop, after the last, or in a gap between two stops with no days of
- * their own. This is the trip-wide half of Trip Mode's "active only within
- * the trip's real date range" gate; `resolveTripModeToday`, above, only
- * ever answers for a stop it's already been told about.
+ * `T.19` — which of a trip's stops (if any) covers `dateKey`. Stops can't
+ * overlap (`_lib/stops.ts`'s `StopOverlapError`) except on a shared
+ * boundary day — leave one stop and arrive at the next on the same date —
+ * so at most two rows can match. On that day the stop being *arrived at*
+ * wins (latest `arriveDate` first): by the time Trip Mode matters on a
+ * travel day you're heading to, or already in, the new place. `null`
+ * when today falls before the first stop, after the last, or in a gap
+ * between two stops with no days of their own. This is the trip-wide half
+ * of Trip Mode's "active only within the trip's real date range" gate;
+ * `resolveTripModeToday`, above, only ever answers for a stop it's
+ * already been told about.
  */
 export async function resolveActiveStop(
   db: TravellogDb,
@@ -157,7 +177,9 @@ export async function resolveActiveStop(
         lte(schema.stops.arriveDate, dateKey),
         gte(schema.stops.departDate, dateKey),
       ),
-    );
+    )
+    .orderBy(desc(schema.stops.arriveDate), asc(schema.stops.position))
+    .limit(1);
   return row ?? null;
 }
 

@@ -31,13 +31,21 @@ export interface TimelineVisit {
   placeCategory: string | null;
   noteExcerpt: string | null;
   firstPhotoStorageKey: string | null;
-  /** Always null until T.10 — kept in the payload shape so T.6 doesn't need a later reshape. */
   tripId: string | null;
+  /** The linked trip's name, for the inline badge — `null` iff `tripId` is null. */
+  tripName: string | null;
+  placeId: string;
 }
 
 export interface VisitTimelineCursor {
   happenedAt: number;
   id: string;
+}
+
+/** Optional narrowing of the timeline — "every check-in at this place", "every check-in on this trip". Both may combine. */
+export interface VisitTimelineFilter {
+  placeId?: string;
+  tripId?: string;
 }
 
 export interface VisitTimelinePage {
@@ -92,8 +100,14 @@ export async function getVisitTimelinePage(
   db: TravellogDb,
   actor: Actor,
   cursor?: VisitTimelineCursor,
+  filter?: VisitTimelineFilter,
 ): Promise<VisitTimelinePage> {
-  const conditions = [eq(schema.visits.userId, actor.userId), eq(schema.visits.tenantId, actor.tenantId)];
+  const conditions = [
+    eq(schema.visits.userId, actor.userId),
+    eq(schema.visits.tenantId, actor.tenantId),
+  ];
+  if (filter?.placeId) conditions.push(eq(schema.visits.placeId, filter.placeId));
+  if (filter?.tripId) conditions.push(eq(schema.visits.tripId, filter.tripId));
   const cursorCondition = cursor
     ? or(
         lt(schema.visits.happenedAt, cursor.happenedAt),
@@ -109,11 +123,14 @@ export async function getVisitTimelinePage(
       tzIana: schema.visits.tzIana,
       note: schema.visits.note,
       tripId: schema.visits.tripId,
+      tripName: schema.trips.name,
+      placeId: schema.places.id,
       placeName: schema.places.name,
       placeCategory: schema.places.category,
     })
     .from(schema.visits)
     .innerJoin(schema.places, eq(schema.places.id, schema.visits.placeId))
+    .leftJoin(schema.trips, eq(schema.trips.id, schema.visits.tripId))
     .where(and(...conditions))
     .orderBy(desc(schema.visits.happenedAt), desc(schema.visits.id))
     .limit(VISIT_TIMELINE_PAGE_SIZE);
@@ -136,6 +153,8 @@ export async function getVisitTimelinePage(
     noteExcerpt: excerpt(row.note),
     firstPhotoStorageKey: firstPhotoByVisitId.get(row.id) ?? null,
     tripId: row.tripId,
+    tripName: row.tripId ? row.tripName : null,
+    placeId: row.placeId,
   }));
 
   return { items, nextCursor: timelineCursorFor(items) };
@@ -223,6 +242,7 @@ export interface VisitDetail {
   note: string | null;
   companions: string[];
   tripId: string | null;
+  tripName: string | null;
   place: {
     id: string;
     name: string;
@@ -249,6 +269,7 @@ export async function getVisitDetail(
       note: schema.visits.note,
       companions: schema.visits.companions,
       tripId: schema.visits.tripId,
+      tripName: schema.trips.name,
       placeId: schema.places.id,
       placeName: schema.places.name,
       placeCategory: schema.places.category,
@@ -257,6 +278,7 @@ export async function getVisitDetail(
     })
     .from(schema.visits)
     .innerJoin(schema.places, eq(schema.places.id, schema.visits.placeId))
+    .leftJoin(schema.trips, eq(schema.trips.id, schema.visits.tripId))
     .where(
       and(
         eq(schema.visits.id, visitId),
@@ -298,6 +320,7 @@ export async function getVisitDetail(
     note: row.note,
     companions: row.companions ? (JSON.parse(row.companions) as string[]) : [],
     tripId: row.tripId,
+    tripName: row.tripId ? row.tripName : null,
     place: {
       id: row.placeId,
       name: row.placeName,
@@ -341,9 +364,16 @@ export async function getTripsOverview(
 ): Promise<TripsOverview> {
   const [trips, [visitAgg]] = await Promise.all([
     db
-      .select({ id: schema.trips.id, name: schema.trips.name, startDate: schema.trips.startDate, endDate: schema.trips.endDate })
+      .select({
+        id: schema.trips.id,
+        name: schema.trips.name,
+        startDate: schema.trips.startDate,
+        endDate: schema.trips.endDate,
+      })
       .from(schema.trips)
-      .where(and(eq(schema.trips.ownerId, actor.userId), eq(schema.trips.tenantId, actor.tenantId))),
+      .where(
+        and(eq(schema.trips.ownerId, actor.userId), eq(schema.trips.tenantId, actor.tenantId)),
+      ),
     db
       .select({
         totalCheckins: count(),
@@ -352,22 +382,36 @@ export async function getTripsOverview(
       })
       .from(schema.visits)
       .innerJoin(schema.places, eq(schema.places.id, schema.visits.placeId))
-      .where(and(eq(schema.visits.userId, actor.userId), eq(schema.visits.tenantId, actor.tenantId))),
+      .where(
+        and(eq(schema.visits.userId, actor.userId), eq(schema.visits.tenantId, actor.tenantId)),
+      ),
   ]);
 
-  const tripCounts: Record<TripStatus, number> = { planning: 0, upcoming: 0, ongoing: 0, completed: 0 };
+  const tripCounts: Record<TripStatus, number> = {
+    planning: 0,
+    upcoming: 0,
+    ongoing: 0,
+    completed: 0,
+  };
   let nextTrip: TripsOverview['nextTrip'] = null;
   let nextTripStartDate: string | null = null;
 
   for (const trip of trips) {
     const hasStops = trip.startDate !== null && trip.endDate !== null;
-    const status = resolveTripStatus({ hasStops, startDate: trip.startDate, endDate: trip.endDate }, todayKey);
+    const status = resolveTripStatus(
+      { hasStops, startDate: trip.startDate, endDate: trip.endDate },
+      todayKey,
+    );
     tripCounts[status]++;
 
     if (status === 'upcoming' && trip.startDate) {
       if (!nextTripStartDate || compareDateKeys(trip.startDate, nextTripStartDate) < 0) {
         nextTripStartDate = trip.startDate;
-        nextTrip = { id: trip.id, name: trip.name, daysUntil: daysBetweenDateKeys(todayKey, trip.startDate) };
+        nextTrip = {
+          id: trip.id,
+          name: trip.name,
+          daysUntil: daysBetweenDateKeys(todayKey, trip.startDate),
+        };
       }
     }
   }
@@ -395,6 +439,8 @@ export interface TripCard {
   dayCount: number;
   /** First stop's place name, plus a count of any additional stops (e.g. "Lisbon +2") — null for a trip with no stops yet. */
   destinationSummary: string | null;
+  /** Check-ins currently linked to this trip (auto or manual) — the one cheap "planned vs. actual" signal the card can show today. */
+  checkinCount: number;
   /**
    * Lightweight, informational tags (`schema.ts`'s header comment — no real
    * `travellog_trip_members` table). Carried on the card payload, not just
@@ -426,7 +472,7 @@ export async function listTripCards(db: TravellogDb, actor: Actor): Promise<Trip
   if (trips.length === 0) return [];
   const tripIds = trips.map((t) => t.id);
 
-  const [stopRows, dayCountRows] = await Promise.all([
+  const [stopRows, dayCountRows, checkinCountRows] = await Promise.all([
     db
       .select({
         tripId: schema.stops.tripId,
@@ -442,6 +488,11 @@ export async function listTripCards(db: TravellogDb, actor: Actor): Promise<Trip
       .from(schema.tripDays)
       .where(inArray(schema.tripDays.tripId, tripIds))
       .groupBy(schema.tripDays.tripId),
+    db
+      .select({ tripId: schema.visits.tripId, checkinCount: count() })
+      .from(schema.visits)
+      .where(and(eq(schema.visits.userId, actor.userId), inArray(schema.visits.tripId, tripIds)))
+      .groupBy(schema.visits.tripId),
   ]);
 
   const stopsByTrip = new Map<string, { placeName: string }[]>();
@@ -451,7 +502,12 @@ export async function listTripCards(db: TravellogDb, actor: Actor): Promise<Trip
     stopsByTrip.set(row.tripId, list);
   }
   const dayCountByTrip = new Map(dayCountRows.map((r) => [r.tripId, r.dayCount]));
+  const checkinCountByTrip = new Map(checkinCountRows.map((r) => [r.tripId, r.checkinCount]));
 
+  // UTC "today" — only a server-side first guess for SSR. `TripsScreen`
+  // re-derives every card's status from `startDate`/`endDate` with the
+  // viewer's own local date after hydration (`useTodayKey`), which is what
+  // actually decides what's shown.
   const todayKey = todayDateKey();
   return trips.map((trip) => {
     const stops = stopsByTrip.get(trip.id) ?? [];
@@ -460,11 +516,15 @@ export async function listTripCards(db: TravellogDb, actor: Actor): Promise<Trip
     return {
       id: trip.id,
       name: trip.name,
-      status: resolveTripStatus({ hasStops, startDate: trip.startDate, endDate: trip.endDate }, todayKey),
+      status: resolveTripStatus(
+        { hasStops, startDate: trip.startDate, endDate: trip.endDate },
+        todayKey,
+      ),
       startDate: trip.startDate,
       endDate: trip.endDate,
       stopCount: stops.length,
       dayCount: dayCountByTrip.get(trip.id) ?? 0,
+      checkinCount: checkinCountByTrip.get(trip.id) ?? 0,
       destinationSummary: first
         ? stops.length > 1
           ? `${first.placeName} +${String(stops.length - 1)}`
@@ -488,15 +548,26 @@ export interface TripPickerEntry {
 }
 
 /**
- * `planning`/`upcoming` trips only — an already-completed (or ongoing)
- * trip's itinerary is edited from Trips instead (`docs/adhoc/web-planner.md`
- * screen 1). A lighter fetch than `listTripCards`: no stop/place join for a
- * destination summary and no day count, since the picker only ever shows a
- * stop count — those extra joins would be pure waste here.
+ * Every trip, with the data the picker needs to decide status itself:
+ * `PlannerPicker` keeps only `planning`/`upcoming` ones — an already-
+ * completed (or ongoing) trip's itinerary is edited from Trips instead
+ * (`docs/adhoc/web-planner.md` screen 1) — using the *viewer's* local date
+ * (`useTodayKey`), not this server's UTC date; the `status` here is the
+ * SSR first guess. A lighter fetch than `listTripCards`: no stop/place join
+ * for a destination summary and no day count, since the picker only ever
+ * shows a stop count — those extra joins would be pure waste here.
  */
-export async function listTripsForPicker(db: TravellogDb, actor: Actor): Promise<TripPickerEntry[]> {
+export async function listTripsForPicker(
+  db: TravellogDb,
+  actor: Actor,
+): Promise<TripPickerEntry[]> {
   const trips = await db
-    .select({ id: schema.trips.id, name: schema.trips.name, startDate: schema.trips.startDate, endDate: schema.trips.endDate })
+    .select({
+      id: schema.trips.id,
+      name: schema.trips.name,
+      startDate: schema.trips.startDate,
+      endDate: schema.trips.endDate,
+    })
     .from(schema.trips)
     .where(and(eq(schema.trips.ownerId, actor.userId), eq(schema.trips.tenantId, actor.tenantId)));
 
@@ -514,8 +585,10 @@ export async function listTripsForPicker(db: TravellogDb, actor: Actor): Promise
   const entries: TripPickerEntry[] = [];
   for (const trip of trips) {
     const hasStops = trip.startDate !== null && trip.endDate !== null;
-    const status = resolveTripStatus({ hasStops, startDate: trip.startDate, endDate: trip.endDate }, todayKey);
-    if (status !== 'planning' && status !== 'upcoming') continue;
+    const status = resolveTripStatus(
+      { hasStops, startDate: trip.startDate, endDate: trip.endDate },
+      todayKey,
+    );
     entries.push({
       id: trip.id,
       name: trip.name,
@@ -533,6 +606,7 @@ export async function listTripsForPicker(db: TravellogDb, actor: Actor): Promise
 
 export interface WorkspaceStop {
   id: string;
+  placeId: string;
   placeName: string;
   arriveDate: string;
   departDate: string;
@@ -555,6 +629,7 @@ export async function listWorkspaceStops(
   const rows = await db
     .select({
       id: schema.stops.id,
+      placeId: schema.stops.placeId,
       placeName: schema.places.name,
       arriveDate: schema.stops.arriveDate,
       departDate: schema.stops.departDate,
@@ -664,4 +739,32 @@ export async function listWorkspaceDays(
   }
 
   return days.map((day) => ({ ...day, items: itemsByDay.get(day.id) ?? [] }));
+}
+
+// ---------------------------------------------------------------------------
+// Trip link picker (check-in detail column's "Link to trip")
+
+export interface TripLinkOption {
+  id: string;
+  name: string;
+  startDate: string | null;
+  endDate: string | null;
+}
+
+/** Every trip the caller owns, name + derived dates, newest start first — the manual-link picker's option list. */
+export async function listTripsForLinking(
+  db: TravellogDb,
+  actor: Actor,
+): Promise<TripLinkOption[]> {
+  const rows = await db
+    .select({
+      id: schema.trips.id,
+      name: schema.trips.name,
+      startDate: schema.trips.startDate,
+      endDate: schema.trips.endDate,
+    })
+    .from(schema.trips)
+    .where(and(eq(schema.trips.ownerId, actor.userId), eq(schema.trips.tenantId, actor.tenantId)))
+    .orderBy(desc(schema.trips.startDate), asc(schema.trips.name));
+  return rows;
 }

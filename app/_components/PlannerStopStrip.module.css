@@ -1,23 +1,61 @@
 .chip {
-  all: unset;
+  display: flex;
+  align-items: stretch;
   box-sizing: border-box;
-  cursor: pointer;
   min-width: 180px;
-  padding: var(--sv-space-3) var(--sv-space-4);
   border-radius: var(--sv-radius-lg);
   border: var(--sv-border-width-hairline) solid var(--sv-color-border);
   background: var(--sv-color-surface-raised);
-  touch-action: none;
-}
-
-.chip:focus-visible {
-  outline: 2px solid var(--sv-color-focus-ring);
-  outline-offset: 2px;
+  /* Horizontal strip: the finger may still scroll it sideways; the DS touch sensor lifts a chip only after a still long-press. */
+  touch-action: pan-x;
 }
 
 .chipActive {
   background: var(--sv-color-text-primary);
   border-color: var(--sv-color-text-primary);
+}
+
+.select {
+  all: unset;
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  padding: var(--sv-space-3) var(--sv-space-2) var(--sv-space-3) var(--sv-space-4);
+  border-radius: var(--sv-radius-lg) 0 0 var(--sv-radius-lg);
+}
+
+.select:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 2px;
+}
+
+.handle {
+  all: unset;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sv-space-2);
+  cursor: grab;
+  color: var(--sv-color-text-muted);
+  border-radius: 0 var(--sv-radius-lg) var(--sv-radius-lg) 0;
+  touch-action: none;
+}
+
+.handle:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 2px;
+}
+
+.chipActive .handle {
+  color: var(--sv-color-surface);
+  opacity: 0.8;
+}
+
+.handleIcon {
+  width: 14px;
+  height: 14px;
 }
 
 .chipName {

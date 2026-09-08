@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { sdk } from '@sovereignfs/sdk';
+import { sniffRasterImageType } from '../../_lib/file-type';
 import { newId } from '../../_lib/ids';
 
 /** A single check-in photo — mirrors `runtime`'s Warden attachment cap (`MAX_ATTACHMENT_BYTES`). */
@@ -17,6 +18,11 @@ const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
  * The client uploads the photo here first and gets back a `storageKey`,
  * then passes that into `createVisitAction`'s existing `photos` field
  * (unchanged from `T.4` — it already accepts pre-resolved storage keys).
+ *
+ * The stored content type is sniffed from the bytes (`_lib/file-type.ts`)
+ * and must be a raster image — a client-declared `image/svg+xml` is a
+ * script-capable document once the platform serves it inline from the
+ * runtime origin via a signed URL.
  */
 export async function POST(request: Request): Promise<Response> {
   const session = await sdk.auth.requireSession();
@@ -39,10 +45,19 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const contentType = sniffRasterImageType(bytes);
+  if (!contentType) {
+    return NextResponse.json(
+      { error: 'That photo isn’t a supported image (JPEG, PNG, GIF, WebP, HEIC).' },
+      { status: 400 },
+    );
+  }
+
   const object = await sdk.storage.put({
     key: `visits/${session.user.id}/${newId()}`,
-    body: file,
-    contentType: file.type,
+    body: bytes,
+    contentType,
     ownerUserId: session.user.id,
   });
 

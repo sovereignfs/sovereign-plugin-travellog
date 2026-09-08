@@ -26,7 +26,11 @@ vi.mock('@sovereignfs/sdk', () => ({
   },
 }));
 
-import { DEFAULT_NOMINATIM_BASE_URL, getPlaceProvider } from '../place-provider';
+import {
+  DEFAULT_NOMINATIM_BASE_URL,
+  getPlaceProvider,
+  resetPlaceProviderCacheForTests,
+} from '../place-provider';
 
 const ctx = { tenantId: 'tenant-1', userId: 'user-1' };
 
@@ -42,6 +46,7 @@ let t: TestDb;
 beforeEach(async () => {
   t = await createTestDb();
   harness.nominatimBaseUrl = null;
+  resetPlaceProviderCacheForTests();
 });
 
 afterEach(() => {

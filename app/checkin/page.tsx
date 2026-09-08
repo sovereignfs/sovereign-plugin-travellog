@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Button,
@@ -11,21 +11,12 @@ import {
   PageContainer,
   PageHeader,
   Spinner,
-  SuggestionInput,
-  useCommitOnEnterOrBlur,
   useIsOffline,
   useToast,
-  type SuggestionOption,
 } from '@sovereignfs/ui';
 import { offline } from '@sovereignfs/sdk/offline';
 import { offlineQueue } from '@sovereignfs/sdk/offline-queue';
-import {
-  createPlaceAction,
-  createVisitAction,
-  listRecentPlacesAction,
-  reverseGeocodePlaceAction,
-  searchPlacesAction,
-} from '../actions';
+import { createVisitAction, listRecentPlacesAction, reverseGeocodePlaceAction } from '../actions';
 import {
   OFFLINE_CACHE_KEY_RECENT_PLACES,
   OFFLINE_PLUGIN_ID,
@@ -34,33 +25,35 @@ import {
 } from '../_lib/offline-cache';
 import type { PlaceCandidate } from '../_lib/place-provider';
 import type { RecentPlace } from '../_lib/queries';
+import { localDateKey, localTimeOfDay, zonedTimeToUtcMs } from '../_lib/timezone';
 import { useCurrentPosition } from '../_lib/use-current-position';
 import type { CreateVisitPhotoInput } from '../_lib/visits';
+import {
+  candidateLocation,
+  PlaceSearchField,
+  resolvePlaceId,
+  SelectedPlaceSummary,
+} from '../_components/PlaceSearchField';
 import styles from './page.module.css';
 
-const SEARCH_DEBOUNCE_MS = 250;
-const MIN_QUERY_LENGTH = 2;
-
-/** Structurally compatible with both `PlaceCandidate` and `RecentPlace` — every call site passes one or the other. */
-function candidateLocation(candidate: {
-  category?: string | null;
-  city?: string | null;
-  country?: string | null;
-}): string | null {
-  return [candidate.category, candidate.city, candidate.country].filter(Boolean).join(' · ') || null;
+/** `"YYYY-MM-DDTHH:mm"` for a `datetime-local` input, in the given zone. */
+function toLocalInputValue(utcMs: number, tzIana: string): string {
+  return `${localDateKey(utcMs, tzIana)}T${localTimeOfDay(utcMs, tzIana)}`;
 }
 
 /**
  * `T.7`'s check-in creation flow — the three paths from `CONCEPT.md`
  * (search-first, GPS "check in here", manual free-text) converging on the
- * same confirm step. Deliberately plain, un-designed layout: `SPEC.md`'s
- * `T.7` explicitly defers screen placement/layout to a mobile
- * concept-review pass that hasn't happened yet — this builds the real
- * server-action-consuming logic now, not a finished screen. A top-level
- * route (outside `(home)/`), not nested under the sidebar layout —
- * `ThreeColumnLayout` has no responsive behavior and is confirmed broken
- * below 768px (`T.5`'s status entry), which would defeat a mobile-only
- * screen before it even loaded.
+ * same confirm step, plus a backdated "when" field (the moment defaults to
+ * now and stays there unless changed — a check-in for last night's dinner
+ * shouldn't have to wait for the Check-ins screen to be re-dated). A
+ * top-level route (outside `(home)/`), not nested under the sidebar layout.
+ *
+ * The note field does **not** submit on blur. It used to (via
+ * `useCommitOnEnterOrBlur`), which meant tapping "Add a photo", "Remove
+ * photo", "Change", or the when field after typing a note checked the
+ * user in on the spot — the rule's own stated exception applies: a form
+ * with an always-visible submit button. Enter still submits, as a form.
  */
 export default function CheckInPage() {
   const router = useRouter();
@@ -69,8 +62,6 @@ export default function CheckInPage() {
   const isOffline = useIsOffline();
 
   const [query, setQuery] = useState('');
-  const [options, setOptions] = useState<PlaceCandidate[]>([]);
-  const [searching, setSearching] = useState(false);
   const [gpsSuggestion, setGpsSuggestion] = useState<PlaceCandidate | null | undefined>(undefined);
   const [recentPlaces, setRecentPlaces] = useState<RecentPlace[]>([]);
 
@@ -79,6 +70,8 @@ export default function CheckInPage() {
   const [note, setNote] = useState('');
   const [photo, setPhoto] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  /** `null` = "now" (resolved at submit time); a string = the user backdated it. */
+  const [when, setWhen] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // `T.21` — feeds the offline picker below: while online, refresh the
@@ -125,35 +118,6 @@ export default function CheckInPage() {
     };
   }, [photo]);
 
-  // Debounced search, ranked by GPS proximity when available — the same
-  // `let cancelled` + cleanup-clears-timer pattern as
-  // `sovereign-plugin-docs`'s `FolderShareDialog`.
-  useEffect(() => {
-    if (query.trim().length < MIN_QUERY_LENGTH) {
-      setOptions([]);
-      setSearching(false);
-      return;
-    }
-    let cancelled = false;
-    setSearching(true);
-    const timer = setTimeout(() => {
-      searchPlacesAction(query.trim(), position.coords ?? undefined)
-        .then((results) => {
-          if (!cancelled) setOptions(results);
-        })
-        .catch(() => {
-          if (!cancelled) setOptions([]);
-        })
-        .finally(() => {
-          if (!cancelled) setSearching(false);
-        });
-    }, SEARCH_DEBOUNCE_MS);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [query, position.coords]);
-
   // Once a position is granted, resolve it to a single best-guess place —
   // "check in here" is a suggestion to confirm, not an auto check-in.
   useEffect(() => {
@@ -172,17 +136,6 @@ export default function CheckInPage() {
     };
   }, [position.status, position.coords]);
 
-  const suggestionOptions = useMemo<SuggestionOption[]>(
-    () =>
-      options.map((candidate, index) => ({
-        id: String(index),
-        label: candidate.name,
-        meta: candidateLocation(candidate) ?? undefined,
-        icon: <Icon name="map-pin" size="sm" aria-hidden={true} />,
-      })),
-    [options],
-  );
-
   function choosePlace(candidate: PlaceCandidate, source: 'manual' | 'gps'): void {
     setSelected(candidate);
     setSelectedSource(source);
@@ -192,23 +145,7 @@ export default function CheckInPage() {
     setSelected(null);
     setNote('');
     setPhoto(null);
-  }
-
-  async function resolvePlaceId(candidate: PlaceCandidate): Promise<string | null> {
-    if (candidate.existingPlaceId) return candidate.existingPlaceId;
-    const result = await createPlaceAction({
-      name: candidate.name,
-      category: candidate.category,
-      lat: candidate.lat,
-      lng: candidate.lng,
-      address: candidate.address,
-      city: candidate.city,
-      state: candidate.state,
-      country: candidate.country,
-      countryCode: candidate.countryCode,
-      postalCode: candidate.postalCode,
-    });
-    return result.ok ? result.place.id : null;
+    setWhen(null);
   }
 
   async function uploadPhoto(file: File): Promise<string | null> {
@@ -223,16 +160,20 @@ export default function CheckInPage() {
     return data.storageKey;
   }
 
+  /** The instant being recorded: now, or the backdated wall-clock value read in the device's own zone. */
+  function resolveHappenedAt(tzIana: string): number {
+    if (!when) return Date.now();
+    const [dateKey, time] = when.split('T');
+    if (!dateKey || !time) return Date.now();
+    return zonedTimeToUtcMs(dateKey, time.slice(0, 5), tzIana);
+  }
+
   /**
    * `T.21` — no place/photo resolution here at all, unlike the online path:
    * a genuinely offline device can only offer a place it already has a real
    * `placeId` for (the Recent places picker below always sets
    * `existingPlaceId`), and photo upload needs a network round-trip this
-   * flow deliberately doesn't attempt (see the "selected" branch's own
-   * offline hint). `offlineQueue.enqueue` applies the mutation to *this*
-   * screen's own optimistic feedback only (the confirmation toast) — it
-   * doesn't try to render an optimistic row in the Check-ins timeline,
-   * which isn't even mounted right now; `OfflineSyncBoundary`
+   * flow deliberately doesn't attempt. `OfflineSyncBoundary`
    * (`app/layout.tsx`) drains the queue against `syncOfflineCheckinAction`
    * once back online, from wherever the user happens to be by then.
    */
@@ -246,11 +187,12 @@ export default function CheckInPage() {
       });
       return;
     }
+    const tzIana = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const payload: QueuedCheckinPayload = {
       placeId: selected.existingPlaceId,
       placeName: selected.name,
-      happenedAt: Date.now(),
-      tzIana: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      happenedAt: resolveHappenedAt(tzIana),
+      tzIana,
       tzOffsetMinutes: -new Date().getTimezoneOffset(),
       note: note.trim() || undefined,
     };
@@ -263,7 +205,8 @@ export default function CheckInPage() {
       });
       changePlace();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Something went wrong saving this offline.';
+      const message =
+        err instanceof Error ? err.message : 'Something went wrong saving this offline.';
       toast.show({ title: 'Couldn’t queue check-in', message, category: 'error' });
     }
   }
@@ -301,10 +244,11 @@ export default function CheckInPage() {
         photos.push({ storageKey, source: 'upload' as const });
       }
 
+      const tzIana = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const result = await createVisitAction({
         placeId,
-        happenedAt: Date.now(),
-        tzIana: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        happenedAt: resolveHappenedAt(tzIana),
+        tzIana,
         tzOffsetMinutes: -new Date().getTimezoneOffset(),
         note: note.trim() || undefined,
         source: selectedSource,
@@ -321,17 +265,6 @@ export default function CheckInPage() {
       setSubmitting(false);
     }
   }
-
-  // The note field doubles as this flow's fast path: Enter or losing focus
-  // (iOS's Done key only fires blur, never Enter — CLAUDE.md's hard rule)
-  // completes the check-in exactly like tapping the always-visible "Check
-  // in" button below. Deliberately the LAST field before that button (after
-  // the photo picker) so a normal top-to-bottom pass reaches it once the
-  // user has already attached a photo if they wanted one — reaching it
-  // early by tabbing out of order still submits, same as the button would.
-  const noteHandlers = useCommitOnEnterOrBlur(() => {
-    void handleCheckIn();
-  });
 
   return (
     <PageContainer maxWidth="sm">
@@ -364,8 +297,14 @@ export default function CheckInPage() {
                 }
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
                     choosePlace(
-                      { name: place.name, lat: place.lat, lng: place.lng, existingPlaceId: place.id },
+                      {
+                        name: place.name,
+                        lat: place.lat,
+                        lng: place.lng,
+                        existingPlaceId: place.id,
+                      },
                       'manual',
                     );
                   }
@@ -375,9 +314,9 @@ export default function CheckInPage() {
                   <Icon name="map-pin" size="md" aria-hidden={true} />
                 </span>
                 <span className={styles.selectedSummaryMain}>
-                  <div className={styles.selectedSummaryName}>{place.name}</div>
+                  <span className={styles.selectedSummaryName}>{place.name}</span>
                   {candidateLocation(place) && (
-                    <div className={styles.selectedSummaryMeta}>{candidateLocation(place)}</div>
+                    <span className={styles.selectedSummaryMeta}>{candidateLocation(place)}</span>
                   )}
                 </span>
               </Card>
@@ -396,7 +335,10 @@ export default function CheckInPage() {
             tabIndex={0}
             onClick={() => position.request()}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') position.request();
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                position.request();
+              }
             }}
           >
             <span
@@ -411,8 +353,8 @@ export default function CheckInPage() {
               )}
             </span>
             <span className={styles.gpsMain}>
-              <div className={styles.gpsTitle}>Check in here</div>
-              <div className={styles.gpsHint}>
+              <span className={styles.gpsTitle}>Check in here</span>
+              <span className={styles.gpsHint}>
                 {position.status === 'idle' && 'Use your current location'}
                 {position.status === 'loading' && 'Finding your location…'}
                 {position.status === 'denied' &&
@@ -428,7 +370,7 @@ export default function CheckInPage() {
                 {position.status === 'granted' &&
                   gpsSuggestion &&
                   `Tap to confirm: ${gpsSuggestion.name}`}
-              </div>
+              </span>
             </span>
           </Card>
 
@@ -441,16 +383,21 @@ export default function CheckInPage() {
               tabIndex={0}
               onClick={() => choosePlace(gpsSuggestion, 'gps')}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') choosePlace(gpsSuggestion, 'gps');
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  choosePlace(gpsSuggestion, 'gps');
+                }
               }}
             >
               <span className={styles.suggestionIcon}>
                 <Icon name="map-pin" size="md" aria-hidden={true} />
               </span>
               <span className={styles.selectedSummaryMain}>
-                <div className={styles.selectedSummaryName}>{gpsSuggestion.name}</div>
+                <span className={styles.selectedSummaryName}>{gpsSuggestion.name}</span>
                 {candidateLocation(gpsSuggestion) && (
-                  <div className={styles.selectedSummaryMeta}>{candidateLocation(gpsSuggestion)}</div>
+                  <span className={styles.selectedSummaryMeta}>
+                    {candidateLocation(gpsSuggestion)}
+                  </span>
                 )}
               </span>
             </Card>
@@ -458,48 +405,43 @@ export default function CheckInPage() {
 
           <div className={styles.divider}>or search</div>
 
-          <SuggestionInput
+          <PlaceSearchField
             value={query}
             onChange={setQuery}
-            options={suggestionOptions}
-            loading={searching}
-            placeholder="Search for a place"
-            aria-label="Search for a place"
-            onSelect={(option) => {
-              const candidate = options[Number(option.id)];
-              if (candidate) choosePlace(candidate, 'manual');
-            }}
+            near={position.coords}
+            onSelect={(candidate) => choosePlace(candidate, 'manual')}
             createLabel={(value) => `Add "${value}" as a new place`}
-            onCreate={(value) => {
-              choosePlace({ name: value, lat: null, lng: null }, 'manual');
-            }}
+            onCreate={(value) => choosePlace({ name: value, lat: null, lng: null }, 'manual')}
           />
         </div>
       )}
 
       {selected && (
-        <div className={styles.section}>
-          <div className={styles.selectedSummary}>
-            <span className={styles.suggestionIcon}>
-              <Icon name="map-pin" size="md" aria-hidden={true} />
-            </span>
-            <span className={styles.selectedSummaryMain}>
-              <div className={styles.selectedSummaryName}>{selected.name}</div>
-              {candidateLocation(selected) && (
-                <div className={styles.selectedSummaryMeta}>{candidateLocation(selected)}</div>
-              )}
-            </span>
-            <button type="button" className={styles.changeButton} onClick={changePlace}>
-              Change
-            </button>
-          </div>
+        <form
+          className={styles.section}
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleCheckIn();
+          }}
+        >
+          <SelectedPlaceSummary
+            name={selected.name}
+            meta={candidateLocation(selected)}
+            onChange={changePlace}
+          />
 
           {isOffline ? (
-            <p className={styles.offlineHint}>Photos aren’t available offline — add one later from Check-ins.</p>
+            <p className={styles.offlineHint}>
+              Photos aren’t available offline — add one later from Check-ins.
+            </p>
           ) : photo && photoPreviewUrl ? (
             <div className={styles.photoPreview}>
-              <img src={photoPreviewUrl} alt="" className={styles.photoThumb} />
-              <Button variant="secondary" size="sm" onClick={() => setPhoto(null)}>
+              <img
+                src={photoPreviewUrl}
+                alt={`Preview for ${selected.name}`}
+                className={styles.photoThumb}
+              />
+              <Button type="button" variant="secondary" size="sm" onClick={() => setPhoto(null)}>
                 Remove photo
               </Button>
             </div>
@@ -513,19 +455,39 @@ export default function CheckInPage() {
             />
           )}
 
+          <div className={styles.whenRow}>
+            <Input
+              type="datetime-local"
+              aria-label="When"
+              value={
+                when ??
+                toLocalInputValue(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone)
+              }
+              onChange={(e) => setWhen(e.target.value)}
+              max={toLocalInputValue(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone)}
+            />
+            {when ? (
+              <button type="button" className={styles.whenReset} onClick={() => setWhen(null)}>
+                Use the current time instead
+              </button>
+            ) : (
+              <span className={styles.whenHint}>
+                Right now — change it to log something earlier.
+              </span>
+            )}
+          </div>
+
           <Input
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="Add a note (optional)"
             aria-label="Note"
-            onKeyDown={noteHandlers.onKeyDown}
-            onBlur={noteHandlers.onBlur}
           />
 
-          <Button onClick={() => void handleCheckIn()} loading={submitting}>
+          <Button type="submit" loading={submitting}>
             Check in
           </Button>
-        </div>
+        </form>
       )}
     </PageContainer>
   );

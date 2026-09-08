@@ -92,13 +92,30 @@
   color: var(--sv-color-text-muted);
 }
 
-.changeButton {
-  all: unset;
-  cursor: pointer;
+.whenRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-space-1);
+}
+
+.whenHint {
   font-size: var(--sv-font-size-xs);
   color: var(--sv-color-text-muted);
+}
+
+.whenReset {
+  all: unset;
+  cursor: pointer;
+  align-self: flex-start;
+  font-size: var(--sv-font-size-xs);
+  color: var(--sv-color-text-primary);
   text-decoration: underline;
-  flex-shrink: 0;
+}
+
+.whenReset:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--sv-radius-sm);
 }
 
 .photoPreview {

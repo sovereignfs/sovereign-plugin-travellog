@@ -1,0 +1,5 @@
+.loading {
+  display: flex;
+  justify-content: center;
+  padding: var(--sv-space-8) 0;
+}

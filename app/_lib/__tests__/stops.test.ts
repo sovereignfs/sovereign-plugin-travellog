@@ -158,7 +158,12 @@ describe('updateStop', () => {
     await updateStop(t.travellog, tripId, stop.id, { departDate: '2026-09-03' });
 
     const days = await listTripDays(t.travellog, stop.id);
-    expect(days.map((d) => d.date)).toEqual(['2026-08-31', '2026-09-01', '2026-09-02', '2026-09-03']);
+    expect(days.map((d) => d.date)).toEqual([
+      '2026-08-31',
+      '2026-09-01',
+      '2026-09-02',
+      '2026-09-03',
+    ]);
   });
 
   it('shrinking the date range removes trip_day rows when none have itinerary items', async () => {
@@ -199,7 +204,10 @@ describe('updateStop', () => {
     ).rejects.toThrow(TripDayHasItemsError);
 
     // Nothing changed — the stop's own dates are untouched, the day survives.
-    const [unchangedStop] = await t.db.select().from(schema.stops).where(eq(schema.stops.id, stop.id));
+    const [unchangedStop] = await t.db
+      .select()
+      .from(schema.stops)
+      .where(eq(schema.stops.id, stop.id));
     expect(unchangedStop?.departDate).toBe('2026-09-03');
     // Aug 31 → Sep 3 inclusive is 4 days (Aug 31, Sep 1, Sep 2, Sep 3).
     expect(await listTripDays(t.travellog, stop.id)).toHaveLength(4);
@@ -277,7 +285,7 @@ describe('deleteStop', () => {
 });
 
 describe('reorderStop', () => {
-  it('moving the last stop to the front updates the trip’s recomputed start date', async () => {
+  it('reordering never changes the trip’s date range — it is the earliest arrival to the latest departure regardless of order', async () => {
     const stopA = await createStop(t.travellog, tripId, {
       placeId: placeAId,
       arriveDate: '2026-08-31',
@@ -295,8 +303,8 @@ describe('reorderStop', () => {
     expect(stops.map((s) => s.id)).toEqual([stopB.id, stopA.id]);
 
     const trip = await getTrip();
-    expect(trip.startDate).toBe('2026-09-02'); // stopB is now first
-    expect(trip.endDate).toBe('2026-09-01'); // stopA is now last
+    expect(trip.startDate).toBe('2026-08-31');
+    expect(trip.endDate).toBe('2026-09-04');
   });
 
   it('a no-op reorder (already in place) leaves order unchanged', async () => {

@@ -35,6 +35,21 @@ Place search never depends on this being reachable — a plugin-local search
 over your own previously-created places always runs alongside it, and
 creating a place manually (name only, no external search) always works.
 
+## Uploads
+
+- **Check-in photos** must be a real raster image (JPEG, PNG, GIF, WebP, or
+  HEIC — decided by the file's bytes, not its declared type; SVG is refused),
+  up to 8 MB.
+- **Trip attachments** may be a PDF or one of those image formats, up to
+  15 MB. Anything else (HTML, plain text, office documents) is refused: a
+  stored object is served back inline under the instance's own origin, so
+  only formats a browser can't execute are accepted.
+- **Swarm exports** are ZIPs up to 50 MB (compressed). Photos in an export
+  are URLs on Foursquare's image CDN and are fetched by the import job only
+  from `*.4sqi.net` / `*.foursquare.com` over HTTPS — never from any other
+  host the file might name. The uploaded ZIP is deleted from storage once
+  the import completes.
+
 ## Data protection
 
 A check-in's free-text note (`visit.note`) is classified `sensitive` under

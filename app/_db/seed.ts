@@ -105,6 +105,7 @@ export async function seedDemoData(db: TravellogDb, ctx: SeedContext): Promise<b
       photoPosition = positionAfter(photoPosition);
       await db.insert(schema.visitPhotos).values({
         id: 'seed-visit-photo-0',
+        tenantId: ctx.tenantId,
         visitId,
         storageKey: 'seed/placeholder.jpg',
         position: photoPosition,

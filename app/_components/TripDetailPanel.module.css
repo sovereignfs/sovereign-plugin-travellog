@@ -22,11 +22,53 @@
   color: var(--sv-color-text-subtle);
 }
 
+.inlineLink {
+  color: var(--sv-color-text-primary);
+  text-decoration: underline;
+}
+
+.inlineLink:focus-visible,
+.primaryLink:focus-visible,
+.secondaryLink:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--sv-radius-sm);
+}
+
 .companionsField {
   margin-top: var(--sv-space-2);
 }
 
-.openInPlanner {
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sv-space-3);
   margin-top: var(--sv-space-2);
-  align-self: flex-start;
+}
+
+/* Links styled as the DS primary/secondary buttons — `Button` has no link mode, and these are real navigation. */
+.primaryLink,
+.secondaryLink {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--sv-space-2) var(--sv-space-3);
+  border-radius: var(--sv-radius-md);
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.primaryLink {
+  background: var(--sv-color-text-primary);
+  color: var(--sv-color-surface);
+}
+
+.secondaryLink {
+  border: var(--sv-border-width-hairline) solid var(--sv-color-border);
+  color: var(--sv-color-text-primary);
+}
+
+.deleteButton {
+  margin-left: auto;
 }

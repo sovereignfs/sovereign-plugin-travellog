@@ -1,32 +1,20 @@
 'use client';
 
 import { useState } from 'react';
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core';
+import { closestCenter, DndContext, type DragEndEvent } from '@dnd-kit/core';
 import {
   arrayMove,
   SortableContext,
-  sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Badge, Button, useToast } from '@sovereignfs/ui';
+import { Badge, Button, DragHandleRow, useReorderSensors, useToast } from '@sovereignfs/ui';
 import { reorderItineraryItemAction } from '../actions';
 import { formatDayHeading } from '../_lib/dates';
 import type { WorkspaceDay, WorkspaceItineraryItem } from '../_lib/queries';
 import { AddItineraryItemDialog } from './AddItineraryItemDialog';
 import styles from './PlannerDayList.module.css';
-
-/** Matches `PlannerStopStrip`'s own constant/rationale: short enough that dnd-kit can still tell a plain click from a drag start. */
-const ACTIVATION_DISTANCE_PX = 6;
 
 function ItemRow({
   item,
@@ -37,33 +25,48 @@ function ItemRow({
   isActive: boolean;
   onSelect: () => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.id,
+  });
 
   return (
-    <button
-      type="button"
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
-      className={[styles.item, isActive ? styles.itemActive : ''].filter(Boolean).join(' ')}
-      onClick={onSelect}
-      {...attributes}
-      {...listeners}
-    >
-      {item.plannedTime && <span className={styles.itemTime}>{item.plannedTime}</span>}
-      <span className={styles.itemMain}>
-        <span className={styles.itemName}>{item.placeName ?? item.title}</span>
-        {item.placeCategory && <span className={styles.itemMeta}>{item.placeCategory}</span>}
-      </span>
-      {/* Only a real commitment gets a badge — an ordinary flexible item
-          shows nothing at all, not a muted "Flexible" label
-          (`web-planner.md` screen 2's own annotation: the unmarked default
-          should read as unremarkable). */}
-      {item.isFixed && (
-        <Badge variant="mono" uppercase={false} size="sm">
-          Fixed
-        </Badge>
-      )}
-    </button>
+    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}>
+      {/* The DS `DragHandleRow`: dnd-kit's listeners go on its handle only,
+          so the row's own select button keeps Enter/Space for selecting
+          (with listeners on the same button, dnd-kit swallowed both keys to
+          start a keyboard drag). */}
+      <DragHandleRow
+        isDragging={isDragging}
+        handleProps={{
+          ...attributes,
+          ...listeners,
+          'aria-label': `Reorder ${item.placeName ?? item.title ?? 'activity'}`,
+        }}
+      >
+        <button
+          type="button"
+          className={[styles.item, isActive ? styles.itemActive : ''].filter(Boolean).join(' ')}
+          onClick={onSelect}
+          aria-pressed={isActive}
+          data-no-dnd
+        >
+          {item.plannedTime && <span className={styles.itemTime}>{item.plannedTime}</span>}
+          <span className={styles.itemMain}>
+            <span className={styles.itemName}>{item.placeName ?? item.title}</span>
+            {item.placeCategory && <span className={styles.itemMeta}>{item.placeCategory}</span>}
+          </span>
+          {/* Only a real commitment gets a badge — an ordinary flexible item
+              shows nothing at all, not a muted "Flexible" label
+              (`web-planner.md` screen 2's own annotation: the unmarked default
+              should read as unremarkable). */}
+          {item.isFixed && (
+            <Badge variant="mono" uppercase={false} size="sm">
+              Fixed
+            </Badge>
+          )}
+        </button>
+      </DragHandleRow>
+    </div>
   );
 }
 
@@ -82,11 +85,7 @@ function DayGroup({
 }) {
   const toast = useToast();
   const [addOpen, setAddOpen] = useState(false);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: ACTIVATION_DISTANCE_PX } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const sensors = useReorderSensors();
 
   function handleDragEnd(event: DragEndEvent): void {
     const { active, over } = event;
@@ -115,7 +114,8 @@ function DayGroup({
       {/* One `DndContext` per day, not one shared across the whole list —
           scopes collision detection to this day's own items so a drag can
           never land in a different day (`T.16`'s review checklist: "reorder
-          within a day", not across). Explicit `id`, same SSR/hydration
+          within a day", not across — moving between days is the detail
+          panel's "Move to" control). Explicit `id`, same SSR/hydration
           reason as `PlannerStopStrip`'s own `DndContext`. */}
       <DndContext
         id={`planner-day-${day.id}-dnd`}
@@ -137,7 +137,12 @@ function DayGroup({
         </SortableContext>
       </DndContext>
 
-      <Button variant="ghost" size="sm" className={styles.addActivity} onClick={() => setAddOpen(true)}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className={styles.addActivity}
+        onClick={() => setAddOpen(true)}
+      >
         + Add activity
       </Button>
 

@@ -29,6 +29,8 @@ vi.mock('@sovereignfs/sdk', () => ({
 
 import { POST } from '../route';
 
+const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]);
+
 function requestWithFile(file: File | null): Request {
   const formData = new FormData();
   if (file) formData.set('file', file);
@@ -41,7 +43,9 @@ function requestWithFile(file: File | null): Request {
 describe('POST /checkin/upload-photo', () => {
   it('requires a session', async () => {
     harness.currentUser = null;
-    await expect(POST(requestWithFile(new File(['x'], 'a.jpg', { type: 'image/jpeg' })))).rejects.toThrow();
+    await expect(
+      POST(requestWithFile(new File(['x'], 'a.jpg', { type: 'image/jpeg' }))),
+    ).rejects.toThrow();
     harness.currentUser = { id: 'user-1', tenantId: 'tenant-1' };
   });
 
@@ -66,9 +70,17 @@ describe('POST /checkin/upload-photo', () => {
     expect(response.status).toBe(400);
   });
 
+  it('rejects an SVG (script-capable) even though it is declared image/*', async () => {
+    const svg = new File(['<svg onload="alert(1)"/>'], 'a.svg', { type: 'image/svg+xml' });
+    const response = await POST(requestWithFile(svg));
+    expect(response.status).toBe(400);
+  });
+
   it('uploads a valid image and returns its storage key', async () => {
     harness.putCalls = [];
-    const response = await POST(requestWithFile(new File(['x'], 'a.jpg', { type: 'image/jpeg' })));
+    const response = await POST(
+      requestWithFile(new File([JPEG_BYTES], 'a.jpg', { type: 'image/jpeg' })),
+    );
     expect(response.status).toBe(200);
     const body = (await response.json()) as { storageKey: string };
     expect(body.storageKey).toMatch(/^visits\/user-1\//);

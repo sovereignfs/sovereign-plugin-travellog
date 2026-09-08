@@ -81,3 +81,75 @@ export function localTimeOfDay(utcMs: number, tzIana: string): string {
   // en-GB + hourCycle: 'h23' formats as zero-padded 24-hour "HH:mm" directly.
   return formatter.format(new Date(utcMs));
 }
+
+/**
+ * The UTC instant at which the wall clock in `tzIana` reads `HH:mm` on
+ * `dateKey` — the inverse of `localDateKey` + `localTimeOfDay`. Solved
+ * iteratively: assume the zone's offset at UTC-midnight-ish, re-derive the
+ * offset at the resulting instant, and correct once more — which converges
+ * for every real zone because offsets only change at transitions, and a
+ * second pass lands on the correct side of one. `T.18`'s countdown uses
+ * this so "minutes until 18:00" is a real difference of instants and stays
+ * right across a DST transition day (a bare wall-clock subtraction is an
+ * hour off on those two days a year). On a spring-forward gap (a wall
+ * time that never occurs), the instant just after the gap is returned.
+ */
+export function zonedTimeToUtcMs(dateKey: string, timeOfDay: string, tzIana: string): number {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const [hours, minutes] = timeOfDay.split(':').map(Number);
+  const asIfUtc = Date.UTC(year ?? 1970, (month ?? 1) - 1, day ?? 1, hours ?? 0, minutes ?? 0);
+
+  let guess = asIfUtc - offsetMinutesAt(asIfUtc, tzIana) * 60_000;
+  guess = asIfUtc - offsetMinutesAt(guess, tzIana) * 60_000;
+  return guess;
+}
+
+const partsFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+/** The zone's UTC offset in minutes (east-positive) at a given instant. */
+export function offsetMinutesAt(utcMs: number, tzIana: string): number {
+  let formatter = partsFormatterCache.get(tzIana);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: tzIana,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    partsFormatterCache.set(tzIana, formatter);
+  }
+  const parts: Record<string, number> = {};
+  for (const part of formatter.formatToParts(new Date(utcMs))) {
+    if (part.type !== 'literal') parts[part.type] = Number(part.value);
+  }
+  const wallAsUtc = Date.UTC(
+    parts.year ?? 1970,
+    (parts.month ?? 1) - 1,
+    parts.day ?? 1,
+    parts.hour ?? 0,
+    parts.minute ?? 0,
+    parts.second ?? 0,
+  );
+  return Math.round((wallAsUtc - Math.floor(utcMs / 1000) * 1000) / 60_000);
+}
+
+const zoneNameFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * A short zone label for an instant (`"PDT"`, `"GMT+9"`) — shown next to a
+ * check-in's local time when the viewer's own zone differs, so a Tokyo
+ * check-in read from London doesn't present a bare "2:40 PM".
+ */
+export function zoneAbbreviation(utcMs: number, tzIana: string): string {
+  let formatter = zoneNameFormatterCache.get(tzIana);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', { timeZone: tzIana, timeZoneName: 'short' });
+    zoneNameFormatterCache.set(tzIana, formatter);
+  }
+  const part = formatter.formatToParts(new Date(utcMs)).find((p) => p.type === 'timeZoneName');
+  return part?.value ?? tzIana;
+}

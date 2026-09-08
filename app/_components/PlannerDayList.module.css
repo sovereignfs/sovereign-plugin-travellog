@@ -24,6 +24,8 @@
 }
 
 .item {
+  all: unset;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: var(--sv-space-3);
@@ -34,7 +36,11 @@
   background: var(--sv-color-surface);
   cursor: pointer;
   text-align: left;
-  touch-action: manipulation;
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 2px;
 }
 
 /* Same "solid border replaces the default subtle one" selection treatment
