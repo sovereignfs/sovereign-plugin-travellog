@@ -63,6 +63,13 @@
   color: var(--sv-color-error-text);
 }
 
+.removeButton:focus-visible,
+.rowMain:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--sv-radius-sm);
+}
+
 .addButton {
   align-self: flex-start;
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { sdk } from '@sovereignfs/sdk';
 import { requireTripDayOwner, requireTripOwner, requireUser } from '../../../../_lib/authz';
 import { getDb } from '../../../../_lib/db';
+import { sniffFileType } from '../../../../_lib/file-type';
 import { newId } from '../../../../_lib/ids';
 
 /**
@@ -17,6 +18,13 @@ import { newId } from '../../../../_lib/ids';
  * `createAttachmentAction` checks it again independently once the row is
  * about to be created (never trust a client-supplied id twice removed from
  * its own check).
+ *
+ * Accepted types are decided by the bytes (`_lib/file-type.ts`), never by
+ * the client's declared `File.type`: PDFs and raster images only. The
+ * platform serves a stored object inline with its stored content type from
+ * the runtime origin, outside the CSP-gated surface — a `text/html` or SVG
+ * "attachment" would have been a script-running page for anyone handed
+ * its signed link.
  */
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 
@@ -36,7 +44,9 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (file.size > MAX_ATTACHMENT_BYTES) {
     return NextResponse.json(
-      { error: `Attachments are limited to ${String(Math.floor(MAX_ATTACHMENT_BYTES / (1024 * 1024)))} MB.` },
+      {
+        error: `Attachments are limited to ${String(Math.floor(MAX_ATTACHMENT_BYTES / (1024 * 1024)))} MB.`,
+      },
       { status: 400 },
     );
   }
@@ -60,10 +70,18 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());
+  const contentType = sniffFileType(bytes);
+  if (!contentType) {
+    return NextResponse.json(
+      { error: 'Attachments can be PDFs or photos (JPEG, PNG, GIF, WebP, HEIC).' },
+      { status: 400 },
+    );
+  }
+
   const object = await sdk.storage.put({
     key: `attachments/${actor.userId}/${newId()}`,
     body: bytes,
-    contentType: file.type || 'application/octet-stream',
+    contentType,
     ownerUserId: actor.userId,
   });
 

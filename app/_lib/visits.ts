@@ -82,6 +82,7 @@ export async function createVisit(
       position = positionAfter(position);
       await tx.insert(schema.visitPhotos).values({
         id: newId(),
+        tenantId: actor.tenantId,
         visitId: id,
         storageKey: photo.storageKey,
         position,
@@ -93,7 +94,10 @@ export async function createVisit(
 
   const [row] = await db.select().from(schema.visits).where(eq(schema.visits.id, id));
   if (!row) throw new Error('createVisit: insert did not return a row');
-  return (await sdk.crypto.open(schema.visits, row as Record<string, unknown>)) as unknown as VisitRow;
+  return (await sdk.crypto.open(
+    schema.visits,
+    row as Record<string, unknown>,
+  )) as unknown as VisitRow;
 }
 
 export interface UpdateVisitInput {
@@ -109,6 +113,12 @@ export interface UpdateVisitInput {
  * first and passes the confirmed row — this function trusts `visitId`
  * without re-checking ownership, so it must never be exposed directly to
  * an action without that guard.
+ *
+ * A change to `happenedAt`/`tzIana` moves the visit's local calendar date,
+ * so the auto-link is re-derived in the same transaction — unless the
+ * link is `'manual'`, which no recompute ever overrides (`schema.ts`'s
+ * `linkSource` invariant). Previously only `createVisit` computed the
+ * link, so a re-dated check-in kept whichever trip it was first filed under.
  */
 export async function updateVisit(
   db: TravellogDb,
@@ -116,21 +126,42 @@ export async function updateVisit(
   patch: UpdateVisitInput,
 ): Promise<VisitRow> {
   const now = Date.now();
-  const sealed = await sdk.crypto.seal(schema.visits, {
-    ...(patch.note !== undefined ? { note: patch.note } : {}),
-    ...(patch.companions !== undefined
-      ? { companions: patch.companions.length > 0 ? JSON.stringify(patch.companions) : null }
-      : {}),
-    ...(patch.happenedAt !== undefined ? { happenedAt: patch.happenedAt } : {}),
-    ...(patch.tzIana !== undefined ? { tzIana: patch.tzIana } : {}),
-    ...(patch.tzOffsetMinutes !== undefined ? { tzOffsetMinutes: patch.tzOffsetMinutes } : {}),
-    updatedAt: now,
+  await db.transaction(async (tx) => {
+    const [current] = await tx.select().from(schema.visits).where(eq(schema.visits.id, visitId));
+    if (!current) throw new Error('updateVisit: visit not found');
+
+    const happenedAt = patch.happenedAt ?? current.happenedAt;
+    const tzIana = patch.tzIana ?? current.tzIana;
+    const dateMoved = happenedAt !== current.happenedAt || tzIana !== current.tzIana;
+    const relink =
+      dateMoved && current.linkSource !== 'manual'
+        ? await computeAutoLinkForVisit(
+            tx,
+            { userId: current.userId, tenantId: current.tenantId },
+            { happenedAt, tzIana },
+          )
+        : null;
+
+    const sealed = await sdk.crypto.seal(schema.visits, {
+      ...(patch.note !== undefined ? { note: patch.note } : {}),
+      ...(patch.companions !== undefined
+        ? { companions: patch.companions.length > 0 ? JSON.stringify(patch.companions) : null }
+        : {}),
+      ...(patch.happenedAt !== undefined ? { happenedAt: patch.happenedAt } : {}),
+      ...(patch.tzIana !== undefined ? { tzIana: patch.tzIana } : {}),
+      ...(patch.tzOffsetMinutes !== undefined ? { tzOffsetMinutes: patch.tzOffsetMinutes } : {}),
+      ...(relink ? { tripId: relink.tripId, linkSource: relink.linkSource } : {}),
+      updatedAt: now,
+    });
+    await tx.update(schema.visits).set(sealed).where(eq(schema.visits.id, visitId));
   });
-  await db.update(schema.visits).set(sealed).where(eq(schema.visits.id, visitId));
 
   const [row] = await db.select().from(schema.visits).where(eq(schema.visits.id, visitId));
   if (!row) throw new Error('updateVisit: row disappeared mid-update');
-  return (await sdk.crypto.open(schema.visits, row as Record<string, unknown>)) as unknown as VisitRow;
+  return (await sdk.crypto.open(
+    schema.visits,
+    row as Record<string, unknown>,
+  )) as unknown as VisitRow;
 }
 
 /**
@@ -155,12 +186,27 @@ export async function setVisitTripLink(
 
   const [row] = await db.select().from(schema.visits).where(eq(schema.visits.id, visitId));
   if (!row) throw new Error('setVisitTripLink: row disappeared mid-update');
-  return (await sdk.crypto.open(schema.visits, row as Record<string, unknown>)) as unknown as VisitRow;
+  return (await sdk.crypto.open(
+    schema.visits,
+    row as Record<string, unknown>,
+  )) as unknown as VisitRow;
 }
 
-/** Photos cascade at the DB level (ON DELETE CASCADE) — no manual cleanup needed. */
-export async function deleteVisit(db: TravellogDb, visitId: string): Promise<void> {
-  await db.delete(schema.visits).where(eq(schema.visits.id, visitId));
+export interface DeleteVisitResult {
+  /** `sdk.storage` keys of the photos whose rows just cascaded away — the caller deletes the bytes after commit (the data layer never touches `sdk.storage`; see `attachments.ts`). Before this, every deleted check-in leaked its photos in storage. */
+  photoStorageKeys: string[];
+}
+
+/** Photo rows cascade at the DB level (ON DELETE CASCADE); their storage objects are the caller's to remove. */
+export async function deleteVisit(db: TravellogDb, visitId: string): Promise<DeleteVisitResult> {
+  return db.transaction(async (tx) => {
+    const photos = await tx
+      .select({ storageKey: schema.visitPhotos.storageKey })
+      .from(schema.visitPhotos)
+      .where(eq(schema.visitPhotos.visitId, visitId));
+    await tx.delete(schema.visits).where(eq(schema.visits.id, visitId));
+    return { photoStorageKeys: photos.map((p) => p.storageKey) };
+  });
 }
 
 /**
@@ -236,21 +282,32 @@ export async function addVisitPhoto(
   visitId: string,
   photo: AddVisitPhotoInput,
 ): Promise<void> {
-  const existing = await db
-    .select({ position: schema.visitPhotos.position })
-    .from(schema.visitPhotos)
-    .where(eq(schema.visitPhotos.visitId, visitId));
-  const maxPosition = existing.reduce<number | undefined>(
-    (max, row) => (max === undefined || row.position > max ? row.position : max),
-    undefined,
-  );
+  // Read-then-append inside one transaction — two concurrent appends
+  // otherwise read the same max and land on the same position.
+  await db.transaction(async (tx) => {
+    const [visit] = await tx
+      .select({ tenantId: schema.visits.tenantId })
+      .from(schema.visits)
+      .where(eq(schema.visits.id, visitId));
+    if (!visit) throw new Error('addVisitPhoto: visit not found');
 
-  await db.insert(schema.visitPhotos).values({
-    id: newId(),
-    visitId,
-    storageKey: photo.storageKey,
-    position: positionAfter(maxPosition),
-    source: photo.source,
-    createdAt: Date.now(),
+    const existing = await tx
+      .select({ position: schema.visitPhotos.position })
+      .from(schema.visitPhotos)
+      .where(eq(schema.visitPhotos.visitId, visitId));
+    const maxPosition = existing.reduce<number | undefined>(
+      (max, row) => (max === undefined || row.position > max ? row.position : max),
+      undefined,
+    );
+
+    await tx.insert(schema.visitPhotos).values({
+      id: newId(),
+      tenantId: visit.tenantId,
+      visitId,
+      storageKey: photo.storageKey,
+      position: positionAfter(maxPosition),
+      source: photo.source,
+      createdAt: Date.now(),
+    });
   });
 }

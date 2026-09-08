@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useState, useTransition, type FormEvent } from 'react';
 import {
   Button,
   ConfirmDialog,
@@ -18,6 +18,7 @@ import {
   type TripAttachmentView,
 } from '../actions';
 import type { AttachmentKind } from '../_lib/attachments';
+import { formatDayHeading } from '../_lib/dates';
 import styles from './TripAttachments.module.css';
 
 const KIND_LABEL: Record<AttachmentKind, string> = {
@@ -42,9 +43,9 @@ function titleFromFilename(filename: string): string {
  * CRUD, authz, the upload route) but no web UI ever wired to it until now.
  * Fetched on demand when `TripDetailPanel` mounts this for a given trip —
  * same "resolve on select, not bundled into the cards list fetch" pattern
- * `CheckinsTimeline`'s `getVisitDetailAction` already established — rather
- * than eagerly fetching every trip's attachments (and their signed URLs)
- * up front for a panel most cards never open.
+ * `CheckinsTimeline`'s `getVisitDetailAction` already established. Lists
+ * day-level attachments too, labelled with their date. The composer is a
+ * real `<form>` so Enter submits.
  */
 export function TripAttachments({ tripId }: { tripId: string }) {
   const toast = useToast();
@@ -86,10 +87,13 @@ export function TripAttachments({ tripId }: { tripId: string }) {
     if (next && !title.trim()) setTitle(titleFromFilename(next.name));
   }
 
-  async function handleUpload(): Promise<void> {
+  async function handleUpload(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
     if (!file || !title.trim() || uploading) return;
     if (file.size > MAX_ATTACHMENT_BYTES) {
-      setError(`Attachments are limited to ${String(Math.floor(MAX_ATTACHMENT_BYTES / (1024 * 1024)))} MB.`);
+      setError(
+        `Attachments are limited to ${String(Math.floor(MAX_ATTACHMENT_BYTES / (1024 * 1024)))} MB.`,
+      );
       return;
     }
     setUploading(true);
@@ -138,7 +142,11 @@ export function TripAttachments({ tripId }: { tripId: string }) {
         setAttachments((prev) => prev?.filter((a) => a.id !== target.id) ?? null);
         setPendingDelete(null);
       } else {
-        toast.show({ title: 'Couldn’t remove attachment', message: result.error, category: 'error' });
+        toast.show({
+          title: 'Couldn’t remove attachment',
+          message: result.error,
+          category: 'error',
+        });
         setPendingDelete(null);
       }
     });
@@ -163,7 +171,10 @@ export function TripAttachments({ tripId }: { tripId: string }) {
                   rel="noreferrer"
                 >
                   <span className={styles.rowTitle}>{attachment.title}</span>
-                  <span className={styles.rowKind}>{KIND_LABEL[attachment.kind]}</span>
+                  <span className={styles.rowKind}>
+                    {KIND_LABEL[attachment.kind]}
+                    {attachment.date ? ` · ${formatDayHeading(attachment.date)}` : ''}
+                  </span>
                 </a>
                 <button
                   type="button"
@@ -180,7 +191,7 @@ export function TripAttachments({ tripId }: { tripId: string }) {
       )}
 
       {addOpen ? (
-        <div className={styles.composer}>
+        <form className={styles.composer} onSubmit={(e) => void handleUpload(e)}>
           {error && (
             <p className={styles.feedbackError} role="status" aria-live="polite">
               {error}
@@ -207,28 +218,35 @@ export function TripAttachments({ tripId }: { tripId: string }) {
             onChange={(e) => setTitle(e.target.value)}
           />
           <FileDropzone
+            accept="application/pdf,image/jpeg,image/png,image/gif,image/webp,image/heic"
             label={file ? file.name : 'Choose a file'}
-            hint={file ? undefined : 'or drag and drop here'}
+            hint={file ? undefined : 'PDF or photo — or drag and drop here'}
             ariaLabel="Attachment file"
             disabled={uploading}
             onFileSelect={handleFileSelect}
           />
           <div className={styles.composerActions}>
-            <Button variant="secondary" size="sm" onClick={resetComposer} disabled={uploading}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={resetComposer}
+              disabled={uploading}
+            >
               Cancel
             </Button>
-            <Button
-              size="sm"
-              onClick={() => void handleUpload()}
-              loading={uploading}
-              disabled={!file || !title.trim()}
-            >
+            <Button type="submit" size="sm" loading={uploading} disabled={!file || !title.trim()}>
               {uploading ? 'Uploading…' : 'Add'}
             </Button>
           </div>
-        </div>
+        </form>
       ) : (
-        <Button variant="ghost" size="sm" className={styles.addButton} onClick={() => setAddOpen(true)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={styles.addButton}
+          onClick={() => setAddOpen(true)}
+        >
           + Add attachment
         </Button>
       )}

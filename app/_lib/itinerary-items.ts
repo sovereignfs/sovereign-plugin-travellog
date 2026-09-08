@@ -1,9 +1,11 @@
 /**
  * Itinerary item CRUD + reorder — one day's ordered plan. Unlike stops,
  * mutating an item never touches the trip's denormalized dates or its
- * day's own row; the only cross-cutting rule here (SPEC.md's Data model
- * notes) is `isFixed` only being meaningful — and only settable — alongside
- * a `plannedTime`.
+ * day's own row; the only cross-cutting rules here (SPEC.md's Data model
+ * notes) are `isFixed` only being meaningful — and only settable —
+ * alongside a `plannedTime`, and `plannedTime` being a well-formed
+ * zero-padded `"HH:mm"` (every comparison against it is a string compare,
+ * which is only chronological for that exact shape).
  */
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import type { TravellogDb } from '../_db/client';
@@ -15,8 +17,17 @@ import {
   renormalizedPositions,
 } from '../_db/position';
 import { newId } from './ids';
+import { isValidPlannedTime } from './validation';
 
 export type ItineraryItemRow = typeof schema.itineraryItems.$inferSelect;
+
+/** Every user-correctable rejection here — `actions.ts` surfaces exactly these as `fail(...)`, never a raw driver error. */
+export class ItineraryItemValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ItineraryItemValidationError';
+  }
+}
 
 function assertValid(input: {
   placeId?: string | null;
@@ -24,11 +35,14 @@ function assertValid(input: {
   plannedTime?: string | null;
   isFixed?: boolean;
 }): void {
-  if (!input.placeId && !input.title) {
-    throw new Error('An itinerary item needs a place or a title.');
+  if (!input.placeId && !(input.title && input.title.trim().length > 0)) {
+    throw new ItineraryItemValidationError('An itinerary item needs a place or a title.');
+  }
+  if (input.plannedTime != null && !isValidPlannedTime(input.plannedTime)) {
+    throw new ItineraryItemValidationError('A planned time must look like 14:30.');
   }
   if (input.isFixed && !input.plannedTime) {
-    throw new Error('Only a timed item can be marked fixed.');
+    throw new ItineraryItemValidationError('Only a timed item can be marked fixed.');
   }
 }
 
@@ -54,28 +68,42 @@ export async function createItineraryItem(
 
   const id = newId();
   const now = Date.now();
-  const [last] = await db
-    .select({ position: schema.itineraryItems.position })
-    .from(schema.itineraryItems)
-    .where(eq(schema.itineraryItems.tripDayId, tripDayId))
-    .orderBy(desc(schema.itineraryItems.position))
-    .limit(1);
+  // Read-then-append inside one transaction — two concurrent appends
+  // otherwise read the same last position and collide.
+  await db.transaction(async (tx) => {
+    const [trip] = await tx
+      .select({ tenantId: schema.trips.tenantId })
+      .from(schema.trips)
+      .where(eq(schema.trips.id, tripId));
+    if (!trip) throw new Error('createItineraryItem: trip not found');
 
-  await db.insert(schema.itineraryItems).values({
-    id,
-    tripDayId,
-    tripId,
-    placeId: input.placeId ?? null,
-    title: input.title ?? null,
-    plannedTime: input.plannedTime ?? null,
-    isFixed: input.isFixed ? 1 : 0,
-    position: positionAfter(last?.position),
-    notes: input.notes ?? null,
-    createdAt: now,
-    updatedAt: now,
+    const [last] = await tx
+      .select({ position: schema.itineraryItems.position })
+      .from(schema.itineraryItems)
+      .where(eq(schema.itineraryItems.tripDayId, tripDayId))
+      .orderBy(desc(schema.itineraryItems.position))
+      .limit(1);
+
+    await tx.insert(schema.itineraryItems).values({
+      id,
+      tenantId: trip.tenantId,
+      tripDayId,
+      tripId,
+      placeId: input.placeId ?? null,
+      title: input.title?.trim() || null,
+      plannedTime: input.plannedTime ?? null,
+      isFixed: input.isFixed ? 1 : 0,
+      position: positionAfter(last?.position),
+      notes: input.notes ?? null,
+      createdAt: now,
+      updatedAt: now,
+    });
   });
 
-  const [row] = await db.select().from(schema.itineraryItems).where(eq(schema.itineraryItems.id, id));
+  const [row] = await db
+    .select()
+    .from(schema.itineraryItems)
+    .where(eq(schema.itineraryItems.id, id));
   if (!row) throw new Error('createItineraryItem: insert did not return a row');
   return row;
 }
@@ -94,13 +122,22 @@ export interface UpdateItineraryItemInput {
  * item that already has a `plannedTime` is valid; the reverse (clearing
  * `plannedTime` on an already-fixed item without also clearing `isFixed`)
  * is not.
+ *
+ * A changed `plannedTime` re-arms the reminder (`reminderSentAt: null`):
+ * the claim marker exists to fire once per *planned moment*, and moving an
+ * item to a later time is a new moment — without the reset, an item
+ * reminded at 09:40 for a 10:00 slot and then rescheduled to 18:00 would
+ * silently never remind again.
  */
 export async function updateItineraryItem(
   db: TravellogDb,
   itemId: string,
   patch: UpdateItineraryItemInput,
 ): Promise<ItineraryItemRow> {
-  const [current] = await db.select().from(schema.itineraryItems).where(eq(schema.itineraryItems.id, itemId));
+  const [current] = await db
+    .select()
+    .from(schema.itineraryItems)
+    .where(eq(schema.itineraryItems.id, itemId));
   if (!current) throw new Error('updateItineraryItem: item not found');
 
   assertValid({
@@ -110,25 +147,89 @@ export async function updateItineraryItem(
     isFixed: patch.isFixed !== undefined ? patch.isFixed : Boolean(current.isFixed),
   });
 
+  const plannedTimeChanged =
+    patch.plannedTime !== undefined && (patch.plannedTime ?? null) !== current.plannedTime;
+
   await db
     .update(schema.itineraryItems)
     .set({
       ...(patch.placeId !== undefined ? { placeId: patch.placeId } : {}),
-      ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.title !== undefined ? { title: patch.title?.trim() || null } : {}),
       ...(patch.plannedTime !== undefined ? { plannedTime: patch.plannedTime } : {}),
       ...(patch.isFixed !== undefined ? { isFixed: patch.isFixed ? 1 : 0 } : {}),
       ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
+      ...(plannedTimeChanged ? { reminderSentAt: null } : {}),
       updatedAt: Date.now(),
     })
     .where(eq(schema.itineraryItems.id, itemId));
 
-  const [row] = await db.select().from(schema.itineraryItems).where(eq(schema.itineraryItems.id, itemId));
+  const [row] = await db
+    .select()
+    .from(schema.itineraryItems)
+    .where(eq(schema.itineraryItems.id, itemId));
   if (!row) throw new Error('updateItineraryItem: row disappeared mid-update');
   return row;
 }
 
 export async function deleteItineraryItem(db: TravellogDb, itemId: string): Promise<void> {
   await db.delete(schema.itineraryItems).where(eq(schema.itineraryItems.id, itemId));
+}
+
+/**
+ * Moves an item to a different day of the *same* trip, appended at the
+ * end of that day. Same-trip is enforced here (not just by the caller's
+ * authz, which only proves the actor owns both) because `tripId` is a
+ * denormalized copy on the item and must keep agreeing with its day's.
+ * The reminder claim is reset for the same reason as a time change: a new
+ * day is a new planned moment.
+ */
+export async function moveItineraryItem(
+  db: TravellogDb,
+  itemId: string,
+  targetTripDayId: string,
+): Promise<ItineraryItemRow> {
+  await db.transaction(async (tx) => {
+    const [item] = await tx
+      .select()
+      .from(schema.itineraryItems)
+      .where(eq(schema.itineraryItems.id, itemId));
+    if (!item) throw new Error('moveItineraryItem: item not found');
+    if (item.tripDayId === targetTripDayId) return;
+
+    const [day] = await tx
+      .select({ tripId: schema.tripDays.tripId })
+      .from(schema.tripDays)
+      .where(eq(schema.tripDays.id, targetTripDayId));
+    if (!day || day.tripId !== item.tripId) {
+      throw new ItineraryItemValidationError(
+        'An activity can only move to another day of the same trip.',
+      );
+    }
+
+    const [last] = await tx
+      .select({ position: schema.itineraryItems.position })
+      .from(schema.itineraryItems)
+      .where(eq(schema.itineraryItems.tripDayId, targetTripDayId))
+      .orderBy(desc(schema.itineraryItems.position))
+      .limit(1);
+
+    await tx
+      .update(schema.itineraryItems)
+      .set({
+        tripDayId: targetTripDayId,
+        position: positionAfter(last?.position),
+        reminderSentAt: null,
+        updatedAt: Date.now(),
+      })
+      .where(eq(schema.itineraryItems.id, itemId));
+  });
+
+  const [row] = await db
+    .select()
+    .from(schema.itineraryItems)
+    .where(eq(schema.itineraryItems.id, itemId));
+  if (!row) throw new Error('moveItineraryItem: row disappeared mid-move');
+  return row;
 }
 
 /** `targetIndex` is 0-based within the day's item list, excluding the moved item. Same pattern as `./stops.ts`'s `reorderStop`. */
@@ -173,14 +274,20 @@ export async function reorderItineraryItem(
         .where(eq(schema.itineraryItems.id, itemId));
     }
 
-    const [row] = await tx.select().from(schema.itineraryItems).where(eq(schema.itineraryItems.id, itemId));
+    const [row] = await tx
+      .select()
+      .from(schema.itineraryItems)
+      .where(eq(schema.itineraryItems.id, itemId));
     if (!row) throw new Error('reorderItineraryItem: row disappeared mid-reorder');
     return row;
   });
 }
 
 /** A day's items, ordered — `T.16`'s Planner day view reads through this. */
-export async function listItineraryItems(db: TravellogDb, tripDayId: string): Promise<ItineraryItemRow[]> {
+export async function listItineraryItems(
+  db: TravellogDb,
+  tripDayId: string,
+): Promise<ItineraryItemRow[]> {
   return db
     .select()
     .from(schema.itineraryItems)
@@ -201,9 +308,9 @@ export async function listItineraryItems(db: TravellogDb, tripDayId: string): Pr
  * count — the same idiom every other write in this file already uses
  * (`createTrip`/`updateItineraryItem`/etc.'s "select back to confirm"), and
  * the honest one here specifically: `TravellogDb` is typed as
- * `BaseSQLiteDatabase` even on Postgres (`_db/client.ts`), so a raw
- * rowcount isn't guaranteed portable across both dialects the way a plain
- * `select` always is.
+ * `BaseSQLiteDatabase` even on Postgres (`_db/client.ts`), so a raw rowcount
+ * isn't guaranteed portable across both dialects the way a plain `select`
+ * always is.
  */
 export async function claimReminderForItem(
   db: TravellogDb,
@@ -221,4 +328,25 @@ export async function claimReminderForItem(
     .where(eq(schema.itineraryItems.id, itemId));
 
   return row?.reminderSentAt === claimedAtUtcMs;
+}
+
+/**
+ * Releases a claim this tick made but could not act on (the notification
+ * send threw). Conditional on the claim value so a claim won by a *later*
+ * tick is never released by an earlier one's failure path.
+ */
+export async function releaseReminderClaim(
+  db: TravellogDb,
+  itemId: string,
+  claimedAtUtcMs: number,
+): Promise<void> {
+  await db
+    .update(schema.itineraryItems)
+    .set({ reminderSentAt: null })
+    .where(
+      and(
+        eq(schema.itineraryItems.id, itemId),
+        eq(schema.itineraryItems.reminderSentAt, claimedAtUtcMs),
+      ),
+    );
 }

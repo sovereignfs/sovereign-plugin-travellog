@@ -59,6 +59,17 @@
   color: var(--sv-color-text-muted);
 }
 
+.moveRow {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-space-2);
+}
+
+.moveRow > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
 .removeButton {
   align-self: flex-start;
 }

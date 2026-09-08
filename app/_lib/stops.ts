@@ -3,9 +3,13 @@
  * every mutation here has two side effects the caller never triggers
  * directly (SPEC.md's Data model notes):
  *
- * 1. Recomputing the owning trip's denormalized `startDate`/`endDate`
- *    (first stop's `arriveDate` → trip `startDate`; last stop's
- *    `departDate` → trip `endDate`, by `position` order).
+ * 1. Recomputing the owning trip's denormalized `startDate`/`endDate` —
+ *    the earliest `arriveDate` and the latest `departDate` across all of
+ *    the trip's stops. Earliest/latest, **not** "first/last by position":
+ *    `position` is deliberately independent of dates (a stop can be
+ *    reordered before its dates are settled), so deriving the range from
+ *    position order let a reorder produce `startDate > endDate`, after
+ *    which nothing auto-linked and the status resolver went wrong.
  * 2. Syncing that stop's own `travellog_trip_days` rows to match its
  *    `arriveDate`/`departDate` range — added dates get a fresh row;
  *    dropped dates get their row deleted, **unless** it still has
@@ -14,8 +18,17 @@
  *
  * Both happen inside the same transaction as the triggering stop write, so
  * a caller never observes a stop and its trip/day state disagreeing.
+ *
+ * Every date that reaches a write is validated (`assertDateRange`): a
+ * well-formed `YYYY-MM-DD` key, depart ≥ arrive, and no more than
+ * `MAX_STOP_DAYS` days — see `dates.ts` for why the cap is a safety
+ * property, not a product limit. A stop's range may not overlap a sibling's
+ * (`StopOverlapError`), except that two consecutive stops may share one
+ * boundary day (leave Kyoto on the 3rd, arrive in Osaka on the 3rd):
+ * `resolveActiveStop` (`trip-mode.ts`) relies on that invariant to answer
+ * "which stop is today" deterministically.
  */
-import { asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne } from 'drizzle-orm';
 import type { TravellogDb, TravellogTx } from '../_db/client';
 import * as schema from '../_db/schema';
 import {
@@ -25,18 +38,103 @@ import {
   renormalizedPositions,
 } from '../_db/position';
 import { recomputeAutoLinksForActor } from './auto-link';
-import { compareDateKeys, enumerateDateKeys } from './dates';
+import {
+  compareDateKeys,
+  daysBetweenDateKeys,
+  enumerateDateKeys,
+  formatDateRange,
+  isValidDateKey,
+  MAX_STOP_DAYS,
+} from './dates';
 import { newId } from './ids';
 
 export type StopRow = typeof schema.stops.$inferSelect;
 
-export class TripDayHasItemsError extends Error {
+/** Base class for every user-correctable stop rejection — `actions.ts` surfaces exactly these as `fail(...)`, never a raw driver error. */
+export class StopValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StopValidationError';
+  }
+}
+
+export class TripDayHasItemsError extends StopValidationError {
   constructor(public readonly blockedDates: string[]) {
     super(
       `Can't remove ${blockedDates.length === 1 ? 'this day' : 'these days'} — it still has planned items: ${blockedDates.join(', ')}.`,
     );
     this.name = 'TripDayHasItemsError';
   }
+}
+
+export class StopOverlapError extends StopValidationError {
+  constructor(public readonly conflictingRange: string) {
+    super(
+      `Those dates overlap another stop (${conflictingRange}). Stops follow one another — adjust the dates first.`,
+    );
+    this.name = 'StopOverlapError';
+  }
+}
+
+function assertDateRange(arriveDate: string, departDate: string): void {
+  if (!isValidDateKey(arriveDate) || !isValidDateKey(departDate)) {
+    throw new StopValidationError('A stop needs a real arrival and departure date.');
+  }
+  if (compareDateKeys(arriveDate, departDate) > 0) {
+    throw new StopValidationError('A stop can’t depart before it arrives.');
+  }
+  if (daysBetweenDateKeys(arriveDate, departDate) + 1 > MAX_STOP_DAYS) {
+    throw new StopValidationError(
+      `A single stop can’t span more than ${String(MAX_STOP_DAYS)} days — split it into several stops.`,
+    );
+  }
+}
+
+/** Two inclusive ranges overlap unless one ends on or before the other starts — a shared boundary day is allowed. */
+export function stopRangesOverlap(
+  a: { arriveDate: string; departDate: string },
+  b: { arriveDate: string; departDate: string },
+): boolean {
+  return (
+    compareDateKeys(a.arriveDate, b.departDate) < 0 &&
+    compareDateKeys(b.arriveDate, a.departDate) < 0
+  );
+}
+
+async function assertNoOverlap(
+  tx: TravellogTx,
+  tripId: string,
+  excludeStopId: string | null,
+  arriveDate: string,
+  departDate: string,
+): Promise<void> {
+  const siblings = await tx
+    .select({
+      id: schema.stops.id,
+      arriveDate: schema.stops.arriveDate,
+      departDate: schema.stops.departDate,
+    })
+    .from(schema.stops)
+    .where(
+      excludeStopId
+        ? and(eq(schema.stops.tripId, tripId), ne(schema.stops.id, excludeStopId))
+        : eq(schema.stops.tripId, tripId),
+    );
+  const candidate = { arriveDate, departDate };
+  for (const sibling of siblings) {
+    if (stopRangesOverlap(candidate, sibling)) {
+      throw new StopOverlapError(formatDateRange(sibling.arriveDate, sibling.departDate));
+    }
+  }
+}
+
+async function tripTenantId(tx: TravellogTx, tripId: string): Promise<string> {
+  const [trip] = await tx
+    .select({ tenantId: schema.trips.tenantId })
+    .from(schema.trips)
+    .where(eq(schema.trips.id, tripId));
+  if (!trip) throw new Error(`stops: trip ${tripId} not found`);
+  return trip.tenantId;
 }
 
 /**
@@ -52,18 +150,20 @@ async function recomputeTripDatesAndAutoLinks(tx: TravellogTx, tripId: string): 
   const stops = await tx
     .select({ arriveDate: schema.stops.arriveDate, departDate: schema.stops.departDate })
     .from(schema.stops)
-    .where(eq(schema.stops.tripId, tripId))
-    .orderBy(asc(schema.stops.position));
+    .where(eq(schema.stops.tripId, tripId));
 
-  const first = stops[0];
-  const last = stops[stops.length - 1];
+  let startDate: string | null = null;
+  let endDate: string | null = null;
+  for (const stop of stops) {
+    if (startDate === null || compareDateKeys(stop.arriveDate, startDate) < 0)
+      startDate = stop.arriveDate;
+    if (endDate === null || compareDateKeys(stop.departDate, endDate) > 0)
+      endDate = stop.departDate;
+  }
+
   await tx
     .update(schema.trips)
-    .set({
-      startDate: first?.arriveDate ?? null,
-      endDate: last?.departDate ?? null,
-      updatedAt: Date.now(),
-    })
+    .set({ startDate, endDate, updatedAt: Date.now() })
     .where(eq(schema.trips.id, tripId));
 
   const [trip] = await tx
@@ -83,7 +183,7 @@ async function recomputeTripDatesAndAutoLinks(tx: TravellogTx, tripId: string): 
  */
 async function syncTripDaysForStop(
   tx: TravellogTx,
-  stop: { id: string; tripId: string },
+  stop: { id: string; tripId: string; tenantId: string },
   arriveDate: string,
   departDate: string,
 ): Promise<void> {
@@ -116,6 +216,7 @@ async function syncTripDaysForStop(
     if (!existingDates.has(date)) {
       await tx.insert(schema.tripDays).values({
         id: newId(),
+        tenantId: stop.tenantId,
         stopId: stop.id,
         tripId: stop.tripId,
         date,
@@ -138,13 +239,14 @@ export async function createStop(
   tripId: string,
   input: CreateStopInput,
 ): Promise<StopRow> {
-  if (compareDateKeys(input.arriveDate, input.departDate) > 0) {
-    throw new Error('A stop can’t depart before it arrives.');
-  }
+  assertDateRange(input.arriveDate, input.departDate);
   const id = newId();
   const now = Date.now();
 
   return db.transaction(async (tx) => {
+    const tenantId = await tripTenantId(tx, tripId);
+    await assertNoOverlap(tx, tripId, null, input.arriveDate, input.departDate);
+
     const [last] = await tx
       .select({ position: schema.stops.position })
       .from(schema.stops)
@@ -155,6 +257,7 @@ export async function createStop(
 
     await tx.insert(schema.stops).values({
       id,
+      tenantId,
       tripId,
       placeId: input.placeId,
       arriveDate: input.arriveDate,
@@ -167,6 +270,7 @@ export async function createStop(
     for (const date of enumerateDateKeys(input.arriveDate, input.departDate)) {
       await tx.insert(schema.tripDays).values({
         id: newId(),
+        tenantId,
         stopId: id,
         tripId,
         date,
@@ -193,7 +297,8 @@ export interface UpdateStopInput {
  * The caller (`../actions.ts`) resolves ownership first, same
  * trusts-the-caller contract as `./visits.ts`'s `updateVisit`. Throws
  * `TripDayHasItemsError` if shrinking the date range would drop a day that
- * still has itinerary items — nothing is written in that case.
+ * still has itinerary items, `StopOverlapError` if the new range collides
+ * with a sibling — nothing is written in either case.
  */
 export async function updateStop(
   db: TravellogDb,
@@ -207,12 +312,16 @@ export async function updateStop(
 
     const newArrive = patch.arriveDate ?? current.arriveDate;
     const newDepart = patch.departDate ?? current.departDate;
-    if (compareDateKeys(newArrive, newDepart) > 0) {
-      throw new Error('A stop can’t depart before it arrives.');
-    }
+    assertDateRange(newArrive, newDepart);
 
     if (patch.arriveDate !== undefined || patch.departDate !== undefined) {
-      await syncTripDaysForStop(tx, { id: stopId, tripId }, newArrive, newDepart);
+      await assertNoOverlap(tx, tripId, stopId, newArrive, newDepart);
+      await syncTripDaysForStop(
+        tx,
+        { id: stopId, tripId, tenantId: current.tenantId },
+        newArrive,
+        newDepart,
+      );
     }
 
     await tx
@@ -233,14 +342,30 @@ export async function updateStop(
   });
 }
 
+export interface DeleteStopResult {
+  /**
+   * `sdk.storage` keys of the day-level attachments that the `trip_days`
+   * cascade just removed the rows for. The data layer never touches
+   * `sdk.storage` itself (testability — see `attachments.ts`), so the
+   * caller (`actions.ts`) deletes these after the transaction commits;
+   * before this existed, every deleted stop leaked its days' attachment
+   * bytes in storage forever.
+   */
+  attachmentStorageKeys: string[];
+}
+
 /**
  * Throws `TripDayHasItemsError` instead of relying on the DB's own
  * `itinerary_items` restrict to surface a raw FK error — pre-checking gives
  * a clear, specific message (which dates are blocking) instead of a
  * generic constraint failure.
  */
-export async function deleteStop(db: TravellogDb, tripId: string, stopId: string): Promise<void> {
-  await db.transaction(async (tx) => {
+export async function deleteStop(
+  db: TravellogDb,
+  tripId: string,
+  stopId: string,
+): Promise<DeleteStopResult> {
+  return db.transaction(async (tx) => {
     const days = await tx
       .select({ id: schema.tripDays.id, date: schema.tripDays.date })
       .from(schema.tripDays)
@@ -259,8 +384,19 @@ export async function deleteStop(db: TravellogDb, tripId: string, stopId: string
       throw new TripDayHasItemsError(blockedDates.sort());
     }
 
+    const dayIds = days.map((d) => d.id);
+    const attachmentRows =
+      dayIds.length > 0
+        ? await tx
+            .select({ storageKey: schema.attachments.storageKey })
+            .from(schema.attachments)
+            .where(inArray(schema.attachments.tripDayId, dayIds))
+        : [];
+
     await tx.delete(schema.stops).where(eq(schema.stops.id, stopId));
     await recomputeTripDatesAndAutoLinks(tx, tripId);
+
+    return { attachmentStorageKeys: attachmentRows.map((a) => a.storageKey) };
   });
 }
 
@@ -270,6 +406,8 @@ export async function deleteStop(db: TravellogDb, tripId: string, stopId: string
  * `_db/position.ts`'s fractional-position helpers (the same pattern
  * `sovereign-plugin-kanban` uses); renormalizes the whole sequence in the
  * rare case repeated midpoint insertion has exhausted the available gap.
+ * Position is display order only — the trip's date range is derived from
+ * the stops' dates regardless of order (see this file's header).
  */
 export async function reorderStop(
   db: TravellogDb,
@@ -322,7 +460,11 @@ export async function reorderStop(
 
 /** All of a trip's stops, ordered — `T.15`'s Planner strip reads through this. */
 export async function listStops(db: TravellogDb, tripId: string): Promise<StopRow[]> {
-  return db.select().from(schema.stops).where(eq(schema.stops.tripId, tripId)).orderBy(asc(schema.stops.position));
+  return db
+    .select()
+    .from(schema.stops)
+    .where(eq(schema.stops.tripId, tripId))
+    .orderBy(asc(schema.stops.position));
 }
 
 /** All of a stop's trip days, ordered by date. */

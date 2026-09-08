@@ -1,10 +1,23 @@
 'use client';
 
-import { useTransition } from 'react';
+import { useState, useTransition } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Badge, Button, FormField, Icon, OverlayHeader, TagInput, useToast } from '@sovereignfs/ui';
-import { updateTripAction } from '../actions';
+import {
+  Badge,
+  Button,
+  ConfirmDialog,
+  FormField,
+  Icon,
+  Input,
+  OverlayHeader,
+  TagInput,
+  useCommitOnEnterOrBlur,
+  useToast,
+} from '@sovereignfs/ui';
+import { deleteTripAction, updateTripAction } from '../actions';
 import { daysBetweenDateKeys, formatDateRange } from '../_lib/dates';
+import { plural } from '../_lib/format';
 import type { TripCard as TripCardData } from '../_lib/queries';
 import { TripAttachments } from './TripAttachments';
 import styles from './TripDetailPanel.module.css';
@@ -21,41 +34,66 @@ const STATUS_LABEL: Record<TripCardData['status'], string> = {
  * (`T.14`'s "payload 3"). `travellog_trip_members` was never built
  * (`schema.ts`'s header comment: `CONCEPT.md`'s open question 2 resolved
  * toward lightweight companion tags, not real shared access), so this is
- * screen 3's *other* branch: no "Shared with" member list, no
- * `TripShareButton` (screen 5 was cut entirely, per the wireframe's own
- * "Open questions" note) — a plain, editable `trips.companions` field
- * instead, matching `actions.ts`'s own comment that it's "edited through
- * `updateTripAction` like any other."
+ * screen 3's *other* branch: no "Shared with" member list — a plain,
+ * editable `trips.companions` field instead.
  *
- * All meta shown here (status, dates, stop/day counts) is already present
- * on the `TripCard` the caller selected — no second fetch for a detail
- * column this thin, same "don't add a round trip for data already in
- * hand" call `T.13` made for its own card grid.
+ * Also the trip's only home for rename and delete (both actions existed
+ * server-side with no UI), and the "N check-ins on this trip" link into
+ * the filtered timeline — the cheap end of the deferred planned-vs-actual
+ * view, just surfacing the join the auto-link engine already makes.
+ * Attachments include day-level ones, each labelled with its date.
  */
 export function TripDetailPanel({
   trip,
   onClose,
-  onCompanionsChange,
+  onTripChange,
+  onDeleted,
 }: {
   trip: TripCardData;
   onClose: () => void;
-  /** Bubbles the new value up so the caller's own `cards` state stays in sync (re-opening the panel later must not show a stale list). */
-  onCompanionsChange: (tripId: string, companions: string[]) => void;
+  /** Bubbles field edits up so the caller's own `cards` state stays in sync (re-opening the panel later must not show a stale value). */
+  onTripChange: (tripId: string, patch: Partial<Pick<TripCardData, 'companions' | 'name'>>) => void;
+  onDeleted: (tripId: string) => void;
 }) {
   const router = useRouter();
   const toast = useToast();
   const [saving, startSaving] = useTransition();
+  const [name, setName] = useState(trip.name);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, startDeleting] = useTransition();
   const dayCount =
     trip.startDate && trip.endDate ? daysBetweenDateKeys(trip.startDate, trip.endDate) + 1 : null;
 
+  function commitName(): void {
+    const next = name.trim();
+    if (!next) {
+      setName(trip.name);
+      return;
+    }
+    if (next === trip.name) return;
+    const previous = trip.name;
+    onTripChange(trip.id, { name: next });
+    startSaving(async () => {
+      const result = await updateTripAction(trip.id, { name: next });
+      if (!result.ok) {
+        onTripChange(trip.id, { name: previous });
+        setName(previous);
+        toast.show({ title: 'Couldn’t rename', message: result.error, category: 'error' });
+        return;
+      }
+      router.refresh();
+    });
+  }
+  const nameHandlers = useCommitOnEnterOrBlur(commitName);
+
   function handleCompanionsChange(next: string[]): void {
     const previous = trip.companions;
-    onCompanionsChange(trip.id, next);
+    onTripChange(trip.id, { companions: next });
     startSaving(async () => {
       const result = await updateTripAction(trip.id, { companions: next });
       if (!result.ok) {
         toast.show({ title: 'Couldn’t save', message: result.error, category: 'error' });
-        onCompanionsChange(trip.id, previous);
+        onTripChange(trip.id, { companions: previous });
       }
     });
   }
@@ -68,28 +106,56 @@ export function TripDetailPanel({
           {STATUS_LABEL[trip.status]}
         </Badge>
 
+        <FormField label="Name" required>
+          {(field) => (
+            <Input
+              {...field}
+              value={name}
+              disabled={saving}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={nameHandlers.onKeyDown}
+              onBlur={nameHandlers.onBlur}
+            />
+          )}
+        </FormField>
+
         <div className={styles.metaRow}>
           <Icon name="calendar" size="sm" aria-hidden={true} />
           <span>
-            {trip.startDate && trip.endDate ? formatDateRange(trip.startDate, trip.endDate) : 'Dates not set yet'}
+            {trip.startDate && trip.endDate
+              ? formatDateRange(trip.startDate, trip.endDate)
+              : 'Dates not set yet'}
           </span>
         </div>
 
         <div className={styles.metaRow}>
           <Icon name="map-pin" size="sm" aria-hidden={true} />
           <span>
-            {trip.stopCount} stop{trip.stopCount === 1 ? '' : 's'}
+            {trip.destinationSummary ? `${trip.destinationSummary} · ` : ''}
+            {plural(trip.stopCount, 'stop')}
           </span>
         </div>
 
         {dayCount !== null && (
           <div className={styles.metaRow}>
             <Icon name="layers" size="sm" aria-hidden={true} />
-            <span>
-              {dayCount} day{dayCount === 1 ? '' : 's'}
-            </span>
+            <span>{plural(dayCount, 'day')}</span>
           </div>
         )}
+
+        <div className={styles.metaRow}>
+          <Icon name="history" size="sm" aria-hidden={true} />
+          {trip.checkinCount > 0 ? (
+            <Link
+              href={`/travellog/checkins?tripId=${encodeURIComponent(trip.id)}`}
+              className={styles.inlineLink}
+            >
+              {plural(trip.checkinCount, 'check-in')} on this trip →
+            </Link>
+          ) : (
+            <span>No check-ins on this trip yet</span>
+          )}
+        </div>
 
         <FormField
           label="With"
@@ -109,10 +175,50 @@ export function TripDetailPanel({
 
         <TripAttachments key={trip.id} tripId={trip.id} />
 
-        <Button className={styles.openInPlanner} onClick={() => router.push(`/travellog/planner/${trip.id}`)}>
-          Open in Planner →
-        </Button>
+        <div className={styles.actions}>
+          <Link href={`/travellog/planner/${trip.id}`} className={styles.primaryLink}>
+            Open in Planner →
+          </Link>
+          {trip.status === 'ongoing' && (
+            <Link href={`/travellog/planner/${trip.id}/mode`} className={styles.secondaryLink}>
+              Open Trip Mode →
+            </Link>
+          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            className={styles.deleteButton}
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Icon name="trash-2" size="sm" aria-hidden={true} />
+            Delete trip
+          </Button>
+        </div>
       </div>
+
+      {deleteOpen && (
+        <ConfirmDialog
+          open
+          onClose={() => setDeleteOpen(false)}
+          title={`Delete "${trip.name}"?`}
+          message="Every stop, day, activity, and attachment in it goes too. Check-ins stay — they just won't be linked to this trip anymore. This can't be undone."
+          destructive
+          confirmLabel={deleting ? 'Deleting…' : 'Delete trip'}
+          pending={deleting}
+          onConfirm={() => {
+            startDeleting(async () => {
+              const result = await deleteTripAction(trip.id);
+              setDeleteOpen(false);
+              if (result.ok) {
+                toast.show({ title: 'Trip deleted', category: 'success' });
+                onDeleted(trip.id);
+              } else {
+                toast.show({ title: 'Couldn’t delete', message: result.error, category: 'error' });
+              }
+            });
+          }}
+        />
+      )}
     </div>
   );
 }

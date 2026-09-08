@@ -16,10 +16,10 @@
  * insert), while `recomputeAutoLinksForActor` also runs standalone from a
  * plain action.
  */
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, gte, isNotNull, isNull, lte, or } from 'drizzle-orm';
 import type { TravellogDb, TravellogTx } from '../_db/client';
 import * as schema from '../_db/schema';
-import { compareDateKeys, daysBetweenDateKeys } from './dates';
+import { addDaysToDateKey, compareDateKeys, daysBetweenDateKeys } from './dates';
 import { localDateKey } from './timezone';
 
 type Db = TravellogDb | TravellogTx;
@@ -71,7 +71,11 @@ export function pickBestTrip(visitDateKey: string, trips: TripDateRange[]): stri
 
 async function tripDateRangesForActor(db: Db, actor: AutoLinkActor): Promise<TripDateRange[]> {
   const rows = await db
-    .select({ tripId: schema.trips.id, startDate: schema.trips.startDate, endDate: schema.trips.endDate })
+    .select({
+      tripId: schema.trips.id,
+      startDate: schema.trips.startDate,
+      endDate: schema.trips.endDate,
+    })
     .from(schema.trips)
     .where(and(eq(schema.trips.ownerId, actor.userId), eq(schema.trips.tenantId, actor.tenantId)));
 
@@ -102,6 +106,15 @@ export async function computeAutoLinkForVisit(
 }
 
 /**
+ * The widest possible skew between a visit's *local* calendar date and its
+ * UTC instant is under a day in either direction (IANA zones span UTC−12
+ * to UTC+14), so a UTC window padded by one day on each side of the trips'
+ * calendar range is guaranteed to contain every visit whose local date
+ * could fall inside any trip.
+ */
+const WINDOW_PAD_DAYS = 1;
+
+/**
  * Re-derives every eligible visit's best-matching trip — called whenever a
  * trip's stops change (`./stops.ts`'s create/update/delete/reorder) and
  * exposed as its own action for a manual re-run. "Eligible" is `linkSource
@@ -117,9 +130,45 @@ export async function computeAutoLinkForVisit(
  * currently linked to a *different* trip, so a narrower scope would miss
  * real reshuffles. Returns how many visits actually changed, so a caller
  * can report "updated N check-ins" rather than a generic "done."
+ *
+ * Bounded, not a full history scan: this runs inside every stop
+ * mutation's transaction, and a decade of Swarm imports is tens of
+ * thousands of visits. Only two kinds of visit can possibly change: one
+ * currently auto-linked (its trip may have shrunk or been deleted), or one
+ * whose instant falls inside the union of every dated trip's range
+ * (padded by `WINDOW_PAD_DAYS` for timezone skew). A visit outside every
+ * trip window and not currently linked resolves to `null` either way — no
+ * write, so no need to read it.
  */
 export async function recomputeAutoLinksForActor(db: Db, actor: AutoLinkActor): Promise<number> {
   const trips = await tripDateRangesForActor(db, actor);
+
+  let windowStart: string | null = null;
+  let windowEnd: string | null = null;
+  for (const trip of trips) {
+    if (windowStart === null || compareDateKeys(trip.startDate, windowStart) < 0)
+      windowStart = trip.startDate;
+    if (windowEnd === null || compareDateKeys(trip.endDate, windowEnd) > 0)
+      windowEnd = trip.endDate;
+  }
+
+  const inWindow =
+    windowStart !== null && windowEnd !== null
+      ? and(
+          gte(
+            schema.visits.happenedAt,
+            Date.parse(`${addDaysToDateKey(windowStart, -WINDOW_PAD_DAYS)}T00:00:00Z`),
+          ),
+          lte(
+            schema.visits.happenedAt,
+            Date.parse(`${addDaysToDateKey(windowEnd, WINDOW_PAD_DAYS)}T23:59:59.999Z`),
+          ),
+        )
+      : undefined;
+  const candidateCondition = inWindow
+    ? or(isNotNull(schema.visits.tripId), inWindow)
+    : isNotNull(schema.visits.tripId);
+
   const visits = await db
     .select({
       id: schema.visits.id,
@@ -133,6 +182,7 @@ export async function recomputeAutoLinksForActor(db: Db, actor: AutoLinkActor): 
         eq(schema.visits.userId, actor.userId),
         eq(schema.visits.tenantId, actor.tenantId),
         or(isNull(schema.visits.linkSource), eq(schema.visits.linkSource, 'auto')),
+        candidateCondition,
       ),
     );
 

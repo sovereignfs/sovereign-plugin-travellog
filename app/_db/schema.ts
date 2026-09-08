@@ -14,7 +14,17 @@
  * - ids are caller-generated text (nanoid).
  * - timestamps are Unix milliseconds (integer).
  * - `position` is a fractional REAL — see ./position.ts.
- * - `tenant_id` on every table (multi-tenancy readiness).
+ * - `tenant_id` on every table (multi-tenancy readiness). The child
+ *   tables that only ever hang off a trip or a visit (`visit_photos`,
+ *   `stops`, `trip_days`, `itinerary_items`, `attachments`) carry it too
+ *   (added in migration 0004 with a `'default'` column default — the
+ *   platform's own single-tenant id — and backfilled from their parent),
+ *   so any future direct query on them has something to scope by rather
+ *   than relying on a transitive join being remembered every time. The
+ *   `default('default')` stays declared here permanently: SQLite can't drop
+ *   a column default without a table rebuild, and a rebuild of a table
+ *   with `restrict` FK children can't run under the platform migrator (see
+ *   `migrations/sqlite/0004_*.sql`'s own header).
  *
  * Slice 2 (`T.10`) adds `trips`/`stops`/`tripDays`/`itineraryItems`/
  * `attachments` and activates `visits.tripId`'s FK (previously deferred —
@@ -29,8 +39,40 @@
  * `visits.companions`. Revisit if that open question resolves toward real
  * shared access; `T.14`'s spec already documents both UI branches.
  */
-import { index, integer, real, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core';
+import {
+  customType,
+  index,
+  integer,
+  real,
+  sqliteTable,
+  text,
+  unique,
+} from 'drizzle-orm/sqlite-core';
 import { encryptedText } from '@sovereignfs/sdk/drizzle';
+
+/**
+ * A Unix-millisecond timestamp column. Declared as a plain `integer` in the
+ * generated SQLite DDL (so `drizzle-kit generate` sees no change from the
+ * `integer(...)` it replaced), but with an explicit driver read mapping:
+ * the Postgres twin (`schema.postgres.ts`) has to store these as `bigint`
+ * (a 13-digit ms timestamp overflows Postgres's 32-bit `integer`), and
+ * node-postgres returns `int8` as a *string* unless a type parser is
+ * registered — the runtime registers none for plugin pools. Drizzle's
+ * sqlite-core `integer()` has no `mapFromDriverValue`, so without this
+ * every timestamp read on a Postgres instance came back as `"1712…"`:
+ * `localDateKey()` then threw `RangeError` from inside every stop
+ * mutation's auto-link recompute, the timeline crashed, and
+ * `claimReminderForItem`'s `===` comparison never matched. Coercing at the
+ * column boundary fixes every read site at once, on both dialects.
+ */
+const msTimestamp = customType<{ data: number; driverData: number | string }>({
+  dataType() {
+    return 'integer';
+  },
+  fromDriver(value) {
+    return typeof value === 'string' ? Number(value) : value;
+  },
+});
 
 export const places = sqliteTable(
   'travellog_places',
@@ -51,9 +93,18 @@ export const places = sqliteTable(
     source: text('source').notNull(),
     /** External id from the provider/import source, for de-dup. Null for a plain manual entry. */
     sourceRef: text('source_ref'),
-    createdBy: text('created_by').notNull(),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    /**
+     * Attribution, not ownership — a place is a shared, tenant-wide entity
+     * that another user's visit or stop may still point at after its creator
+     * deletes their account. Nullable so `_lib/portability.ts`'s deletion
+     * handler can sever the attribution (`created_by = NULL`, counted as
+     * `anonymized`) instead of leaving a dangling user id or inventing a
+     * "deleted user" sentinel (RFC 0097 / the platform's `provideDelete`
+     * rule). Made nullable in migration 0004.
+     */
+    createdBy: text('created_by'),
+    createdAt: msTimestamp('created_at').notNull(),
+    updatedAt: msTimestamp('updated_at').notNull(),
   },
   (t) => [index('travellog_places_tenant_name_idx').on(t.tenantId, t.name)],
 );
@@ -68,7 +119,7 @@ export const visits = sqliteTable(
       .notNull()
       .references(() => places.id, { onDelete: 'restrict' }),
     /** Unix ms, UTC. Always paired with tzIana/tzOffsetMinutes — never read alone for "local time". */
-    happenedAt: integer('happened_at').notNull(),
+    happenedAt: msTimestamp('happened_at').notNull(),
     tzIana: text('tz_iana').notNull(),
     tzOffsetMinutes: integer('tz_offset_minutes').notNull(),
     /**
@@ -118,12 +169,14 @@ export const visits = sqliteTable(
     source: text('source').notNull(),
     /** Import de-dup key — unique per (tenantId, source, externalRef) below. Null for manual/gps check-ins. */
     externalRef: text('external_ref'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: msTimestamp('created_at').notNull(),
+    updatedAt: msTimestamp('updated_at').notNull(),
   },
   (t) => [
     index('travellog_visits_user_happened_idx').on(t.userId, t.happenedAt),
     index('travellog_visits_place_idx').on(t.placeId),
+    /** `deleteTrip`'s `WHERE trip_id = ?` and the FK's own `SET NULL` scan — a full visits scan per trip delete without it. */
+    index('travellog_visits_trip_idx').on(t.tripId),
     unique('travellog_visits_tenant_source_external_ref_unique').on(
       t.tenantId,
       t.source,
@@ -136,6 +189,7 @@ export const visitPhotos = sqliteTable(
   'travellog_visit_photos',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull().default('default'),
     visitId: text('visit_id')
       .notNull()
       .references(() => visits.id, { onDelete: 'cascade' }),
@@ -144,7 +198,7 @@ export const visitPhotos = sqliteTable(
     position: real('position').notNull(),
     /** 'upload' | 'import' — enforced in the data layer, not the schema. */
     source: text('source').notNull(),
-    createdAt: integer('created_at').notNull(),
+    createdAt: msTimestamp('created_at').notNull(),
   },
   (t) => [index('travellog_visit_photos_visit_position_idx').on(t.visitId, t.position)],
 );
@@ -181,8 +235,8 @@ export const trips = sqliteTable(
     /** IANA zone, nullable — a trip's "home" zone for display; individual stops carry no zone of their own in phase 1. */
     timezone: text('timezone'),
     companions: text('companions'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: msTimestamp('created_at').notNull(),
+    updatedAt: msTimestamp('updated_at').notNull(),
   },
   (t) => [index('travellog_trips_owner_start_idx').on(t.ownerId, t.startDate)],
 );
@@ -198,6 +252,7 @@ export const stops = sqliteTable(
   'travellog_stops',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull().default('default'),
     tripId: text('trip_id')
       .notNull()
       .references(() => trips.id, { onDelete: 'cascade' }),
@@ -207,10 +262,14 @@ export const stops = sqliteTable(
     arriveDate: text('arrive_date').notNull(),
     departDate: text('depart_date').notNull(),
     position: real('position').notNull(),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: msTimestamp('created_at').notNull(),
+    updatedAt: msTimestamp('updated_at').notNull(),
   },
-  (t) => [index('travellog_stops_trip_position_idx').on(t.tripId, t.position)],
+  (t) => [
+    index('travellog_stops_trip_position_idx').on(t.tripId, t.position),
+    /** `listReminderCandidateStops` runs every minute across every stop — a date-range index keeps that off a full scan. */
+    index('travellog_stops_dates_idx').on(t.arriveDate, t.departDate),
+  ],
 );
 
 /**
@@ -224,6 +283,7 @@ export const tripDays = sqliteTable(
   'travellog_trip_days',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull().default('default'),
     stopId: text('stop_id')
       .notNull()
       .references(() => stops.id, { onDelete: 'cascade' }),
@@ -233,10 +293,13 @@ export const tripDays = sqliteTable(
     date: text('date').notNull(),
     title: text('title'),
     notes: text('notes'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    createdAt: msTimestamp('created_at').notNull(),
+    updatedAt: msTimestamp('updated_at').notNull(),
   },
-  (t) => [unique('travellog_trip_days_stop_date_unique').on(t.stopId, t.date)],
+  (t) => [
+    unique('travellog_trip_days_stop_date_unique').on(t.stopId, t.date),
+    index('travellog_trip_days_trip_idx').on(t.tripId),
+  ],
 );
 
 /**
@@ -259,6 +322,7 @@ export const itineraryItems = sqliteTable(
   'travellog_itinerary_items',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull().default('default'),
     tripDayId: text('trip_day_id')
       .notNull()
       .references(() => tripDays.id, { onDelete: 'restrict' }),
@@ -283,11 +347,14 @@ export const itineraryItems = sqliteTable(
      * before acting on it"), so this column *is* the idempotency guarantee
      * that a reminder fires once per item, not once per tick.
      */
-    reminderSentAt: integer('reminder_sent_at'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
+    reminderSentAt: msTimestamp('reminder_sent_at'),
+    createdAt: msTimestamp('created_at').notNull(),
+    updatedAt: msTimestamp('updated_at').notNull(),
   },
-  (t) => [index('travellog_itinerary_items_day_position_idx').on(t.tripDayId, t.position)],
+  (t) => [
+    index('travellog_itinerary_items_day_position_idx').on(t.tripDayId, t.position),
+    index('travellog_itinerary_items_trip_idx').on(t.tripId),
+  ],
 );
 
 /**
@@ -300,6 +367,7 @@ export const attachments = sqliteTable(
   'travellog_attachments',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull().default('default'),
     tripId: text('trip_id').references(() => trips.id, { onDelete: 'cascade' }),
     tripDayId: text('trip_day_id').references(() => tripDays.id, { onDelete: 'cascade' }),
     /** 'receipt' | 'booking' | 'accommodation' | 'other' — enforced in the data layer, not the schema. */
@@ -307,7 +375,7 @@ export const attachments = sqliteTable(
     title: text('title').notNull(),
     storageKey: text('storage_key').notNull(),
     createdBy: text('created_by').notNull(),
-    createdAt: integer('created_at').notNull(),
+    createdAt: msTimestamp('created_at').notNull(),
   },
   (t) => [
     index('travellog_attachments_trip_idx').on(t.tripId),
@@ -337,9 +405,9 @@ export const importJobs = sqliteTable(
     id: text('id').primaryKey(),
     tenantId: text('tenant_id').notNull(),
     userId: text('user_id').notNull(),
-    /** 'pending' | 'running' | 'completed' | 'failed' — enforced in the data layer, not the schema. */
+    /** 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' — enforced in the data layer, not the schema. */
     status: text('status').notNull(),
-    /** sdk.storage object key of the uploaded ZIP. */
+    /** sdk.storage object key of the uploaded ZIP — deleted from storage once the job completes or is cancelled (the row keeps the key for the audit trail; `sdk.storage.get` then returns null). */
     storageKey: text('storage_key').notNull(),
     /** Most recent sdk.jobs.enqueue() JobRef.id — reassigned on each resume. */
     platformJobId: text('platform_job_id'),
@@ -353,9 +421,9 @@ export const importJobs = sqliteTable(
     /** Index into the parsed checkins array — resume starts here, not from 0. */
     cursor: integer('cursor').notNull(),
     errorMessage: text('error_message'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
-    completedAt: integer('completed_at'),
+    createdAt: msTimestamp('created_at').notNull(),
+    updatedAt: msTimestamp('updated_at').notNull(),
+    completedAt: msTimestamp('completed_at'),
   },
   (t) => [index('travellog_import_jobs_user_created_idx').on(t.userId, t.createdAt)],
 );

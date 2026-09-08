@@ -7,8 +7,8 @@
 
 ## Status
 
-✅ Phase 1 complete — `T.1`–`T.24` plus `T.5a` have all shipped, manifest at
-`0.27.0`. Phase 1a–1c (Slices 1–3) were complete and hardened first; Phase
+✅ Phase 1 complete — `T.1`–`T.24` plus `T.5a` have all shipped, and `T.25`
+(the post-phase-1 review hardening pass) followed; manifest at `0.28.0`. Phase 1a–1c (Slices 1–3) were complete and hardened first; Phase
 1d closed it out: `T.23` (Sovereign portability hooks — export/import/
 delete) shipped first, live-verified end to end including a byte-exact
 photo round-trip; `T.24` (optional field encryption for `visit.note`)
@@ -19,6 +19,102 @@ request at slot `0.27.0`, well after everything it was originally
 scheduled alongside. Every task in `CONCEPT.md`'s phase 1 scope, web and
 mobile data layer alike, is now shipped — see "Deferred, not yet planned"
 in `CONCEPT.md` and `ROADMAP.md`'s own notes for what's genuinely next.
+
+**`T.25` — Review hardening pass (`0.28.0`).** A full code review of the
+shipped plugin — security, data layer, UI/UX — with every finding fixed in
+one branch, each with a regression test that was seen to fail against the
+pre-fix code. Verification: typecheck, ESLint, Prettier, design-token check,
+and 420 Vitest tests green (35 files). Not live-verified in a browser this
+pass — no dev server was running; the UI changes rest on the check suite
+and code reading. What changed, grouped:
+
+_Security._ `createStopAction` accepted any string as a date key and
+`enumerateDateKeys` looped forever on a malformed one (reproduced: 200k
+iterations in ~100 ms, synchronous) and would insert millions of
+`trip_days` rows for a valid-but-absurd range — every date now passes
+`isValidDateKey` and a `MAX_STOP_DAYS` (366) cap, and stops may no longer
+overlap a sibling (`StopOverlapError`; a shared boundary day is allowed).
+The Swarm import job fetched photo URLs assembled from the uploaded ZIP with
+no host allowlist, followed redirects, cleared its abort timer before
+reading the body, and buffered the whole body before checking the size —
+now allowlisted to `*.4sqi.net`/`*.foursquare.com` over HTTPS,
+`redirect: 'error'`, the timeout covers the body, the cap is enforced while
+streaming, and the stored type is sniffed from the bytes. Both upload routes
+now decide the stored `contentType` from magic bytes (`_lib/file-type.ts`):
+PDFs and raster images only for attachments, raster images only for photos
+(an `image/svg+xml` or `text/html` object was served inline from the runtime
+origin via signed URL, outside the CSP surface). Client-supplied
+`storageKey`s (`createVisitAction.photos[]`, `createAttachmentAction`) must
+now be `<area>/<userId>/<id>` for the caller's own area. Every action
+re-validates its input at runtime (`_lib/validation.ts`) and returns
+`fail(...)` values — a vanished place is "That place no longer exists", not
+a raw FK message; `createStopAction` no longer echoes arbitrary error text.
+
+_Data layer._ On Postgres every timestamp read back as a string (node-
+postgres returns `int8` as text and the runtime registers no parser): the
+schema now declares timestamps through an `msTimestamp` custom column whose
+`fromDriver` coerces, fixing stop mutations, the timeline, and reminders on
+Postgres. Migration 0004 (hand-edited: drizzle-kit's `PRAGMA foreign_keys`
+table rebuild is a no-op inside the migrator's transaction and `DROP TABLE`
+would hit `visits.place_id`'s RESTRICT) makes `places.created_by` nullable
+in place, adds `tenant_id` to the five child tables (backfilled from their
+parent), and adds the missing indexes. Trip dates are now
+min(arrive)..max(depart), not first/last-by-position. Deletes hand back
+their photo/attachment storage keys and the actions remove the objects
+(every delete used to leak them); the Swarm ZIP is deleted on completion.
+`updateVisit` re-runs auto-link when the date moves; the auto-link recompute
+is bounded to visits that can actually change instead of the whole history;
+appends are transactional. Portability: day-level attachments were missing
+from the export; the sweep is one transaction, chunks `IN` lists, deletes
+import jobs + their unowned ZIPs, and severs `places.created_by`
+(`anonymized`); blobs are staged before the import transaction and removed
+on rollback; re-import reuses places by `(source, sourceRef)`. Reminders:
+"next" is the soonest timed item ahead (not first by position), the
+countdown is a difference of real instants (DST-correct via
+`zonedTimeToUtcMs`), a failed send releases the claim, one traveler's
+failure no longer skips the rest of the tick, and a changed `plannedTime`
+re-arms the reminder. The import job marks its own row `failed` on a
+mid-loop error, skips a malformed entry, and honours a cooperative cancel.
+The OSM provider is memoized per base URL so its rate limiter and cache
+actually persist between requests.
+
+_UI._ The check-in note no longer submits on blur (tapping "Add a photo"
+used to check you in); the Planner day list re-syncs after a stop is added
+(it rendered empty until a reload); "today" for trip status, the next-trip
+tile, and the timeline's Today/Yesterday labels is the viewer's local date
+(`useTodayKey`, hydration-safe) instead of UTC; one display locale
+everywhere so SSR and client output match. Keyboard users can select a stop
+or activity again (dnd-kit listeners moved to a dedicated handle, DS
+`DragHandleRow`/`useReorderSensors`, which also fixes touch reorder); every
+`all: unset` control has a `:focus-visible` ring; `TripCard`'s select target
+is a real button with the CTA a sibling link; the detail column is a
+labelled landmark that takes focus and closes on Esc; status filter is the
+DS `SegmentedControl`; page gutters come from `PageContainer`. Below 768px
+the `(home)` shell hides the sidebar and shows `NavTabs`, and
+`MainDetailSplit` renders its detail in a `Sheet`. Trip Mode is live (ticking
+countdown, refetch on visibility, watched position with distance to the
+next stop, platform-aware maps hand-off, past items dimmed, notes shown) and
+has a `loading.tsx`.
+
+_Features and UX gaps closed._ Trip rename and delete, stop edit and delete,
+check-in edit (note, companions, moment in its own zone) and delete, a
+"Link to a trip" picker beside Unlink, text-only activity title edit, move
+an activity to another day, backdated check-ins, timeline filters by trip or
+place (`?tripId=`/`?placeId=`, linked from the trip panel's "N check-ins on
+this trip" row and the check-in panel's "visited N times"), trip names on
+timeline badges, `destinationSummary` and check-in counts on cards, a zone
+label when a check-in's zone differs from the viewer's, one shared
+`PlaceSearchField` for the three place-picking flows, import Stop/Resume and
+a "View check-ins" link, the empty timeline pointing at the real check-in
+screen, "Start Trip Mode" only while the trip is ongoing, and the Settings
+nav entry hidden until it has content.
+
+_Not done here (platform-level, flagged)._ `packages/db`'s plugin pool
+should register an `int8` type parser (Warden and example-encrypted share
+the same `bigint` twin); `/api/storage/[token]` should send
+`X-Content-Type-Options: nosniff` and a `Content-Disposition` for
+non-image types; `@sovereignfs/ui`'s `Button` has no link mode, so the
+plugin styles a few `Link`s as buttons locally.
 
 **`T.5a` — App switcher & account menu chrome (`0.27.0`).** Completed the
 right half of `TravellogHeader` deferred since `T.5`: an `AppsMenu` popover
@@ -3706,6 +3802,40 @@ note is ciphertext at rest (verify by querying the DB directly, not just
 through the app); with it unset, behavior is unchanged from `T.4`.
 
 ---
+
+### T.25 — Review hardening pass
+
+**Goal:** Take the shipped phase-1 plugin through a full code review —
+security, data layer, UI/UX, and feature gaps — and address every finding.
+
+**Deliverables:** See the `T.25` Status entry above for the complete list.
+In summary: runtime input validation on every action; date-key validation
+and a span cap on stops; no overlapping stops; SSRF-safe, size-capped,
+byte-sniffed photo fetching in the Swarm job; byte-sniffed upload routes;
+storage-key ownership checks; Postgres-safe timestamp reads; migration 0004
+(nullable `places.created_by`, `tenant_id` on child tables, indexes);
+storage cleanup on every delete; portability completeness and transactional
+sweep; reminder correctness; hydration-safe local "today"; keyboard/touch
+reorder; mobile layout for `(home)`; the CRUD affordances the web UI lacked;
+timeline filters; live Trip Mode.
+
+**Dependencies:** `T.24`, `T.5a`.
+
+**Review checklist:**
+
+- [x] `createStopAction` with `arriveDate: 'abc'` returns a `fail`, writes nothing, and the server stays responsive.
+- [x] A `9999-12-31` departure is rejected before any `trip_days` insert.
+- [x] Two stops that overlap are rejected; two that share one boundary day are accepted.
+- [x] A photo URL in a Swarm export pointing at a non-Foursquare host is never fetched.
+- [x] An HTML file uploaded as an attachment (declared `application/pdf`) is refused; a JPEG declared `text/html` is stored as `image/jpeg`.
+- [x] `createAttachmentAction` with another user's storage key is refused.
+- [x] `msTimestamp.mapFromDriverValue('1712…')` is a number.
+- [x] Migration 0004 applies on a database with existing visits (no table rebuild).
+- [x] Deleting a check-in, stop, or trip removes its storage objects.
+- [x] Export includes day-level attachments; the deletion sweep removes import jobs and severs `places.created_by`.
+- [x] A reminder whose send throws is released and retried next tick; the other traveler's reminder still sends.
+- [x] Re-dating a check-in re-links it; a manual link is never overridden.
+- [x] Typecheck, ESLint, Prettier (`--ignore-path .prettierignore`, since the `.local` dir is gitignored and the root check skips it), design tokens, Vitest all green.
 
 ## Related
 

@@ -1,6 +1,6 @@
 # Sovereign Travellog — Roadmap
 
-**Manifest version:** 0.27.0 · **Last updated:** 2026-08-29
+**Manifest version:** 0.28.0 · **Last updated:** 2026-09-08
 
 Chronological build index — one row per PR, platform-`ROADMAP.md` style. Full
 task detail lives in [SPEC.md](SPEC.md); the product concept in
@@ -69,9 +69,12 @@ reference anywhere would point at a version that was never shipped.
 | 0.25.0 | Sovereign portability hooks (export/import/delete)            | ✅     | [T.23](SPEC.md#t23--sovereign-portability-hooks-exportimportdelete)                                    |
 | 0.26.0 | App-level field encryption for `visit.note` (RFC 0092)        | ✅     | [T.24](SPEC.md#t24--app-level-field-encryption-for-visitnote-rfc-0092)                                 |
 | 0.27.0 | App switcher & account menu chrome `[parallel]`               | ✅     | [T.5a](SPEC.md#t5a--app-switcher--account-menu-chrome-parallel-with-t6)                                |
+| 0.28.0 | Review hardening pass (security, data, UI/UX, feature gaps)   | ✅     | [T.25](SPEC.md#t25--review-hardening-pass)                                                             |
 
 Phase 1 is now complete — every task above, web and mobile data layer alike,
-has shipped. `T.24` and `T.5a` were both tagged deferred/non-blocking (not
+has shipped. `T.25` is the post-phase-1 review pass: a full code review of
+the shipped plugin (security, data layer, UI/UX) with every finding
+addressed in one branch — see its `SPEC.md` status entry for the list. `T.24` and `T.5a` were both tagged deferred/non-blocking (not
 required for phase 1 to ship) but were picked up on request rather than
 left open.
 

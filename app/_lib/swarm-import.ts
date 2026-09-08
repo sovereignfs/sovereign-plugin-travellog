@@ -126,7 +126,13 @@ export function readSwarmCheckins(zipBytes: Uint8Array): SwarmCheckin[] {
       'checkins.json isn’t in the expected format (expected an array of check-ins).',
     );
   }
-  return items as SwarmCheckin[];
+  // A non-object entry (`null`, a number, a bare string) is skipped here
+  // rather than allowed through to `mapSwarmCheckin`, whose `raw.id` read
+  // would throw and — being outside its own "skip, never abort" contract —
+  // fail the whole import over one malformed entry.
+  return items.filter(
+    (entry): entry is SwarmCheckin => typeof entry === 'object' && entry !== null,
+  );
 }
 
 /**
@@ -154,6 +160,11 @@ function extractPhotoUrls(photos: SwarmCheckin['photos']): string[] {
   return items
     .filter((p): p is Required<SwarmCheckinPhoto> => Boolean(p?.prefix && p?.suffix))
     .map((p) => `${p.prefix}500x500${p.suffix}`);
+}
+
+/** Every `location.*` field is typed as a string but comes from an untrusted file — anything else becomes `null`, never a non-string in a text column. */
+function optionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
 function extractCompanions(withUsers: SwarmCheckin['with']): string[] {
@@ -233,12 +244,12 @@ export function mapSwarmCheckin(raw: SwarmCheckin): MappedSwarmCheckin | null {
     venueName,
     lat: typeof location?.lat === 'number' ? location.lat : null,
     lng: typeof location?.lng === 'number' ? location.lng : null,
-    address: location?.address ?? null,
-    city: location?.city ?? null,
-    state: location?.state ?? null,
-    country: location?.country ?? null,
-    countryCode: location?.cc ? location.cc.toUpperCase() : null,
-    postalCode: location?.postalCode ?? null,
+    address: optionalString(location?.address),
+    city: optionalString(location?.city),
+    state: optionalString(location?.state),
+    country: optionalString(location?.country),
+    countryCode: typeof location?.cc === 'string' && location.cc ? location.cc.toUpperCase() : null,
+    postalCode: optionalString(location?.postalCode),
     category: extractCategory(raw.venue?.categories),
   };
 }

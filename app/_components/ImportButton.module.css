@@ -1,0 +1,22 @@
+/* A link dressed as the DS secondary button — see ImportButton.tsx. */
+.link {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--sv-space-2) var(--sv-space-3);
+  border: var(--sv-border-width-hairline) solid var(--sv-color-border);
+  border-radius: var(--sv-radius-md);
+  background: var(--sv-color-surface-raised);
+  color: var(--sv-color-text-primary);
+  font-size: var(--sv-font-size-sm);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link:hover {
+  background: var(--sv-color-surface-sunken);
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--sv-color-focus-ring);
+  outline-offset: 2px;
+}

@@ -1,64 +1,169 @@
 'use client';
 
-import { useState } from 'react';
-import { Badge, Icon, OverlayHeader, Spinner, useToast } from '@sovereignfs/ui';
-import { setVisitTripLinkAction, type VisitDetailView } from '../actions';
-import { formatLocalTime, localDateKey } from '../_lib/timezone';
+import { useEffect, useState, useTransition } from 'react';
+import {
+  Badge,
+  Button,
+  ConfirmDialog,
+  FormField,
+  Icon,
+  Input,
+  OverlayHeader,
+  Select,
+  Spinner,
+  TagInput,
+  Textarea,
+  useToast,
+} from '@sovereignfs/ui';
+import {
+  deleteVisitAction,
+  listTripsForLinkAction,
+  setVisitTripLinkAction,
+  updateVisitAction,
+  type VisitDetailView,
+} from '../actions';
+import { formatDateRange, formatLongDate } from '../_lib/dates';
+import { plural } from '../_lib/format';
+import type { TripLinkOption } from '../_lib/queries';
+import {
+  formatLocalTime,
+  localDateKey,
+  localTimeOfDay,
+  zoneAbbreviation,
+  zonedTimeToUtcMs,
+} from '../_lib/timezone';
 import styles from './CheckinDetailPanel.module.css';
 
-function formatFullDate(dateKey: string): string {
-  // `dateKey` is `YYYY-MM-DD` in the visit's own zone — parsed as UTC noon
-  // purely to dodge any local-zone rollover in `toLocaleDateString` itself,
-  // not to re-derive the zone (already baked into `dateKey`).
-  const [year, month, day] = dateKey.split('-').map(Number);
-  const date = new Date(Date.UTC(year ?? 1970, (month ?? 1) - 1, day ?? 1, 12));
-  return date.toLocaleDateString(undefined, {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    timeZone: 'UTC',
-  });
-}
-
 /**
- * `MainDetailSplit`'s detail column content for `T.6`'s Check-ins screen —
- * otherwise read-only (`CONCEPT.md`'s Check-ins section scopes web to
- * viewing plus an unlink action; `updateVisitAction`/`deleteVisitAction`
- * already exist server-side from `T.4` but have no web UI hook — not a gap
- * to fix here, just plumbing built ahead of whichever future task needs
- * it). The trip badge + "Unlink" affordance is wired to `T.12`'s
- * `setVisitTripLinkAction` — `tripId` now actually populates (the auto-link
- * engine), so this branch renders for real check-ins, not just in theory.
+ * `MainDetailSplit`'s detail column content for the Check-ins screen. Viewing
+ * plus the editing the concept always implied but the web UI never had: the
+ * note, companions, and the moment (edited in the check-in's *own* zone,
+ * never the viewer's — `zonedTimeToUtcMs` turns the wall-clock value back
+ * into an instant), deletion behind a `ConfirmDialog`, and both halves of
+ * the "auto-link is a suggestion, always overridable" promise — Unlink and
+ * a Link-to-trip picker (only Unlink existed before). Each field commits
+ * inline (`TripDetailPanel`'s companions pattern) — no separate Save step.
  */
 export function CheckinDetailPanel({
   detail,
   loading,
+  viewerZone,
   onClose,
-  onUnlinked,
+  onLinkChanged,
+  onEdited,
+  onDeleted,
+  onFilterByPlace,
+  onFilterByTrip,
 }: {
   detail: VisitDetailView | null;
   loading: boolean;
+  /** The viewer's IANA zone once hydrated — shows a zone label when it differs from the check-in's. */
+  viewerZone: string | null;
   onClose: () => void;
-  /** Called after a successful unlink so the caller can re-fetch this same visit's detail. */
-  onUnlinked?: () => void;
+  /** Called after a link/unlink so the caller updates its row and re-fetches this same visit. */
+  onLinkChanged: (tripId: string | null, tripName: string | null) => void;
+  onEdited: () => void;
+  onDeleted: () => void;
+  onFilterByPlace: (placeId: string) => void;
+  onFilterByTrip: (tripId: string) => void;
 }) {
   const toast = useToast();
-  const [unlinking, setUnlinking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const [when, setWhen] = useState('');
+  const [linking, setLinking] = useState(false);
+  const [tripOptions, setTripOptions] = useState<TripLinkOption[] | null>(null);
+  const [linkTarget, setLinkTarget] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, startDeleting] = useTransition();
 
-  async function handleUnlink(visitId: string): Promise<void> {
-    setUnlinking(true);
+  useEffect(() => {
+    if (!detail) return;
+    setNote(detail.note ?? '');
+    setWhen(
+      `${localDateKey(detail.happenedAt, detail.tzIana)}T${localTimeOfDay(detail.happenedAt, detail.tzIana)}`,
+    );
+  }, [detail]);
+
+  async function save(
+    patch: Parameters<typeof updateVisitAction>[1],
+    revert: () => void,
+  ): Promise<void> {
+    if (!detail) return;
+    setBusy(true);
     try {
-      const result = await setVisitTripLinkAction(visitId, null);
+      const result = await updateVisitAction(detail.id, patch);
       if (!result.ok) {
-        toast.show({ title: 'Couldn’t unlink', message: result.error, category: 'error' });
+        revert();
+        toast.show({ title: 'Couldn’t save', message: result.error, category: 'error' });
         return;
       }
-      onUnlinked?.();
+      onEdited();
     } finally {
-      setUnlinking(false);
+      setBusy(false);
     }
   }
+
+  function commitNote(): void {
+    if (!detail) return;
+    const next = note.trim() ? note : null;
+    if (next === (detail.note ?? null)) return;
+    void save({ note: next }, () => setNote(detail.note ?? ''));
+  }
+
+  function commitWhen(): void {
+    if (!detail) return;
+    const [dateKey, time] = when.split('T');
+    if (!dateKey || !time) return;
+    const happenedAt = zonedTimeToUtcMs(dateKey, time.slice(0, 5), detail.tzIana);
+    if (happenedAt === detail.happenedAt) return;
+    void save({ happenedAt }, () =>
+      setWhen(
+        `${localDateKey(detail.happenedAt, detail.tzIana)}T${localTimeOfDay(detail.happenedAt, detail.tzIana)}`,
+      ),
+    );
+  }
+
+  function commitCompanions(next: string[]): void {
+    if (!detail) return;
+    void save({ companions: next }, () => undefined);
+  }
+
+  async function setLink(tripId: string | null): Promise<void> {
+    if (!detail) return;
+    setBusy(true);
+    try {
+      const result = await setVisitTripLinkAction(detail.id, tripId);
+      if (!result.ok) {
+        toast.show({
+          title: tripId ? 'Couldn’t link' : 'Couldn’t unlink',
+          message: result.error,
+          category: 'error',
+        });
+        return;
+      }
+      const tripName = tripId ? (tripOptions?.find((t) => t.id === tripId)?.name ?? null) : null;
+      setLinking(false);
+      onLinkChanged(tripId, tripName);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openLinkPicker(): Promise<void> {
+    setLinking(true);
+    if (tripOptions === null) {
+      try {
+        const options = await listTripsForLinkAction();
+        setTripOptions(options);
+        setLinkTarget(options[0]?.id ?? '');
+      } catch {
+        setTripOptions([]);
+      }
+    }
+  }
+
+  const showZone = detail !== null && viewerZone !== null && viewerZone !== detail.tzIana;
 
   return (
     <div className={styles.panel}>
@@ -70,14 +175,21 @@ export function CheckinDetailPanel({
           </div>
         )}
         {!loading && !detail && (
-          <p className={styles.missing}>This check-in couldn’t be found — it may have been deleted.</p>
+          <p className={styles.missing}>
+            This check-in couldn’t be found — it may have been deleted.
+          </p>
         )}
         {!loading && detail && (
           <>
             {detail.photos.length > 0 && (
               <div className={styles.photoStrip}>
-                {detail.photos.map((photo) => (
-                  <img key={photo.id} src={photo.url} alt="" className={styles.photo} />
+                {detail.photos.map((photo, index) => (
+                  <img
+                    key={photo.id}
+                    src={photo.url}
+                    alt={`${detail.place.name}, ${String(index + 1)} of ${String(detail.photos.length)}`}
+                    className={styles.photo}
+                  />
                 ))}
               </div>
             )}
@@ -85,8 +197,14 @@ export function CheckinDetailPanel({
             <div className={styles.metaRow}>
               <Icon name="calendar" size="sm" aria-hidden={true} />
               <span>
-                {formatFullDate(localDateKey(detail.happenedAt, detail.tzIana))} ·{' '}
+                {formatLongDate(localDateKey(detail.happenedAt, detail.tzIana))} ·{' '}
                 {formatLocalTime(detail.happenedAt, detail.tzIana)}
+                {showZone && (
+                  <span className={styles.zoneHint}>
+                    {' '}
+                    {zoneAbbreviation(detail.happenedAt, detail.tzIana)}
+                  </span>
+                )}
               </span>
             </div>
 
@@ -97,51 +215,170 @@ export function CheckinDetailPanel({
               </div>
             )}
 
-            {detail.placeVisitCount > 1 && (
-              <div className={styles.metaRow}>
-                <Icon name="history" size="sm" aria-hidden={true} />
-                <span>Visited {detail.placeVisitCount} times</span>
-              </div>
-            )}
-
-            {detail.tripId && (
-              <div className={styles.tripRow}>
-                <Badge variant="mono" uppercase={false}>
-                  Part of a trip
-                </Badge>
+            <div className={styles.metaRow}>
+              <Icon name="history" size="sm" aria-hidden={true} />
+              {detail.placeVisitCount > 1 ? (
                 <button
                   type="button"
-                  className={styles.unlinkButton}
-                  disabled={unlinking}
-                  onClick={() => void handleUnlink(detail.id)}
+                  className={styles.inlineLink}
+                  onClick={() => onFilterByPlace(detail.place.id)}
                 >
-                  {unlinking ? 'Unlinking…' : 'Unlink'}
+                  Visited {plural(detail.placeVisitCount, 'time')} — show them all
                 </button>
-              </div>
-            )}
+              ) : (
+                <span>First time here</span>
+              )}
+            </div>
 
-            {detail.note && (
-              <div className={styles.section}>
-                <div className={styles.sectionLabel}>
-                  <Icon name="file-text" size="sm" aria-hidden={true} />
-                  <span>Note</span>
+            <div className={styles.tripRow}>
+              {detail.tripId ? (
+                <>
+                  <button
+                    type="button"
+                    className={styles.inlineLink}
+                    onClick={() => onFilterByTrip(detail.tripId ?? '')}
+                    title="Show every check-in on this trip"
+                  >
+                    <Badge variant="mono" uppercase={false}>
+                      {detail.tripName ?? 'Trip'}
+                    </Badge>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.textButton}
+                    disabled={busy}
+                    onClick={() => void setLink(null)}
+                  >
+                    Unlink
+                  </button>
+                </>
+              ) : linking ? (
+                <div className={styles.linkPicker}>
+                  {tripOptions === null ? (
+                    <Spinner size="sm" />
+                  ) : tripOptions.length === 0 ? (
+                    <span className={styles.missing}>No trips to link to yet.</span>
+                  ) : (
+                    <>
+                      <Select
+                        aria-label="Trip to link"
+                        size="sm"
+                        value={linkTarget}
+                        onChange={(e) => setLinkTarget(e.target.value)}
+                        disabled={busy}
+                      >
+                        {tripOptions.map((trip) => (
+                          <option key={trip.id} value={trip.id}>
+                            {trip.name}
+                            {trip.startDate && trip.endDate
+                              ? ` (${formatDateRange(trip.startDate, trip.endDate)})`
+                              : ''}
+                          </option>
+                        ))}
+                      </Select>
+                      <Button
+                        size="sm"
+                        onClick={() => void setLink(linkTarget)}
+                        disabled={!linkTarget || busy}
+                      >
+                        Link
+                      </Button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className={styles.textButton}
+                    onClick={() => setLinking(false)}
+                  >
+                    Cancel
+                  </button>
                 </div>
-                <p className={styles.note}>{detail.note}</p>
-              </div>
-            )}
+              ) : (
+                <button
+                  type="button"
+                  className={styles.textButton}
+                  onClick={() => void openLinkPicker()}
+                >
+                  <Icon name="link" size="sm" aria-hidden={true} />
+                  Link to a trip
+                </button>
+              )}
+            </div>
 
-            {detail.companions.length > 0 && (
-              <div className={styles.section}>
-                <div className={styles.sectionLabel}>
-                  <Icon name="users" size="sm" aria-hidden={true} />
-                  <span>With</span>
-                </div>
-                <p className={styles.companions}>{detail.companions.join(', ')}</p>
-              </div>
-            )}
+            <FormField label="When" hint={`In the check-in’s own zone (${detail.tzIana})`}>
+              {(field) => (
+                <Input
+                  {...field}
+                  type="datetime-local"
+                  value={when}
+                  disabled={busy}
+                  onChange={(e) => setWhen(e.target.value)}
+                  onBlur={commitWhen}
+                />
+              )}
+            </FormField>
+
+            <FormField label="Note">
+              {(field) => (
+                <Textarea
+                  {...field}
+                  value={note}
+                  placeholder="Add a note"
+                  disabled={busy}
+                  onChange={(e) => setNote(e.target.value)}
+                  // A multi-line field — Enter inserts a newline, blur commits.
+                  onBlur={commitNote}
+                />
+              )}
+            </FormField>
+
+            <FormField label="With" hint="For your own reference — not shared with anyone.">
+              {(field) => (
+                <TagInput
+                  {...field}
+                  value={detail.companions}
+                  onChange={commitCompanions}
+                  placeholder="Add a name"
+                  disabled={busy}
+                />
+              )}
+            </FormField>
+
+            <Button
+              variant="secondary"
+              className={styles.deleteButton}
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Icon name="trash-2" size="sm" aria-hidden={true} />
+              Delete check-in
+            </Button>
           </>
         )}
       </div>
+
+      {deleteOpen && detail && (
+        <ConfirmDialog
+          open
+          onClose={() => setDeleteOpen(false)}
+          title={`Delete this check-in at ${detail.place.name}?`}
+          message="Its note and photos go with it. This can't be undone."
+          destructive
+          confirmLabel={deleting ? 'Deleting…' : 'Delete'}
+          pending={deleting}
+          onConfirm={() => {
+            startDeleting(async () => {
+              const result = await deleteVisitAction(detail.id);
+              setDeleteOpen(false);
+              if (result.ok) {
+                toast.show({ title: 'Check-in deleted', category: 'success' });
+                onDeleted();
+              } else {
+                toast.show({ title: 'Couldn’t delete', message: result.error, category: 'error' });
+              }
+            });
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -100,7 +100,11 @@ interface CacheEntry {
 }
 
 export function createOsmPlaceProvider(options: OsmPlaceProviderOptions): PlaceProvider {
-  const fetchImpl = options.fetchImpl ?? fetch;
+  // Resolved per call, not captured at construction: the provider is
+  // memoized for the life of the process (`place-provider.ts`), so a
+  // captured `fetch` would outlive any later replacement of the global.
+  const fetchImpl: typeof fetch =
+    options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
   const baseUrl = options.baseUrl.replace(/\/+$/, '');
   const cache = new Map<string, CacheEntry>();
   let lastRequestAt = 0;

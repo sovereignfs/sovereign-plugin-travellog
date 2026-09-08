@@ -25,6 +25,28 @@
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MS_PER_DAY = 86_400_000;
 
+/**
+ * Longest single stop this plugin will materialize `trip_days` rows for
+ * (inclusive day count). A stop is one place with an arrival and a
+ * departure; a year at one address is a sanity ceiling, not a product
+ * limit anyone will hit. Load-bearing for safety, not UX: `enumerateDateKeys`
+ * inserts one `trip_days` row per day inside one transaction, and a server
+ * action is a public endpoint — without a cap, a crafted `9999-12-31`
+ * departure is a multi-million-row write.
+ */
+export const MAX_STOP_DAYS = 366;
+
+/**
+ * One fixed locale for every date/time string this plugin renders. Several
+ * of these render during SSR of client components (trip cards, stop chips,
+ * day headings) — `toLocaleDateString(undefined, …)` would use the *server's*
+ * default locale there and the *browser's* on hydration, producing "Sep 14"
+ * vs "14 Sept" mismatches and text flicker. Pinning one locale keeps SSR
+ * and client output byte-identical; real localization is a later,
+ * platform-level concern (there is no i18n primitive yet).
+ */
+export const DISPLAY_LOCALE = 'en-US';
+
 /** UTC noon for a `YYYY-MM-DD` key — never local midnight (see file header). */
 function toUtcNoon(dateKey: string): Date {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -64,8 +86,19 @@ export function addDaysToDateKey(dateKey: string, days: number): string {
  * before calling this, not the other way around).
  */
 export function enumerateDateKeys(startKey: string, endKey: string): string[] {
+  // Malformed keys are rejected outright rather than compared: a bare
+  // lexicographic loop over a non-date string (`'abc'` → `'NaN-NaN-NaN'`)
+  // never reaches its end key and spins forever, synchronously, on the
+  // server — reproduced before this guard existed.
+  if (!isValidDateKey(startKey) || !isValidDateKey(endKey)) {
+    throw new Error(`enumerateDateKeys: malformed date key (${startKey}, ${endKey})`);
+  }
   if (compareDateKeys(startKey, endKey) > 0) {
     throw new Error(`enumerateDateKeys: start (${startKey}) is after end (${endKey})`);
+  }
+  const span = daysBetweenDateKeys(startKey, endKey) + 1;
+  if (span > MAX_STOP_DAYS) {
+    throw new Error(`enumerateDateKeys: range of ${String(span)} days exceeds MAX_STOP_DAYS`);
   }
   const keys: string[] = [];
   let cursor = startKey;
@@ -113,11 +146,16 @@ export function formatDateRange(startKey: string, endKey: string): string {
   const sameMonth = sameYear && start.getUTCMonth() === end.getUTCMonth();
 
   const dayOnly = (d: Date) =>
-    d.toLocaleDateString(undefined, { day: 'numeric', timeZone: 'UTC' });
+    d.toLocaleDateString(DISPLAY_LOCALE, { day: 'numeric', timeZone: 'UTC' });
   const monthDay = (d: Date) =>
-    d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    d.toLocaleDateString(DISPLAY_LOCALE, { month: 'short', day: 'numeric', timeZone: 'UTC' });
   const monthDayYear = (d: Date) =>
-    d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    d.toLocaleDateString(DISPLAY_LOCALE, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
 
   if (sameMonth) return `${monthDay(start)}–${dayOnly(end)}`;
   if (sameYear) return `${monthDay(start)} – ${monthDay(end)}`;
@@ -126,10 +164,36 @@ export function formatDateRange(startKey: string, endKey: string): string {
 
 /** `T.16`'s day-group heading, e.g. `"Tue, Aug 26"` — UTC-noon anchored for the same reason every other function here is (see file header). */
 export function formatDayHeading(dateKey: string): string {
-  return toUtcNoon(dateKey).toLocaleDateString(undefined, {
+  return toUtcNoon(dateKey).toLocaleDateString(DISPLAY_LOCALE, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/** `"Tuesday, August 26, 2026"` — the check-in detail panel's full date line. */
+export function formatLongDate(dateKey: string): string {
+  return toUtcNoon(dateKey).toLocaleDateString(DISPLAY_LOCALE, {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+/**
+ * `"Aug 26"` this year, `"Aug 26, 2019"` otherwise — the timeline's
+ * day-group heading for anything that isn't today/yesterday. `currentYear`
+ * is a parameter (not `new Date()`) so SSR and hydration agree.
+ */
+export function formatShortDate(dateKey: string, currentYear: number): string {
+  const date = toUtcNoon(dateKey);
+  return date.toLocaleDateString(DISPLAY_LOCALE, {
+    month: 'short',
+    day: 'numeric',
+    year: date.getUTCFullYear() !== currentYear ? 'numeric' : undefined,
     timeZone: 'UTC',
   });
 }

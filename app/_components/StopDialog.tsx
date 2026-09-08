@@ -1,26 +1,18 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import {
-  Button,
-  Dialog,
-  DatePicker,
-  FormField,
-  Icon,
-  SuggestionInput,
-  type SuggestionOption,
-} from '@sovereignfs/ui';
-import { createPlaceAction, createStopAction, searchPlacesAction } from '../actions';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Button, DatePicker, Dialog, FormField } from '@sovereignfs/ui';
+import { createStopAction, updateStopAction } from '../actions';
 import { compareDateKeys } from '../_lib/dates';
 import type { PlaceCandidate } from '../_lib/place-provider';
-import styles from './AddStopDialog.module.css';
-
-const SEARCH_DEBOUNCE_MS = 250;
-const MIN_QUERY_LENGTH = 2;
-
-function candidateLocation(candidate: PlaceCandidate): string | null {
-  return [candidate.category, candidate.city, candidate.country].filter(Boolean).join(' · ') || null;
-}
+import type { WorkspaceStop } from '../_lib/queries';
+import {
+  candidateLocation,
+  PlaceSearchField,
+  resolvePlaceId,
+  SelectedPlaceSummary,
+} from './PlaceSearchField';
+import styles from './StopDialog.module.css';
 
 /**
  * A `YYYY-MM-DD` dateKey read back from `DatePicker`'s `Date`, and vice
@@ -46,12 +38,20 @@ function localDateToDateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+export type StopDialogMode =
+  | {
+      kind: 'add';
+      /** Pre-fills Arrive with the previous stop's departure — the usual "next stop starts where the last one ended". */ defaultArriveKey?:
+        string | null;
+    }
+  | { kind: 'edit'; stop: WorkspaceStop };
+
 /**
- * `docs/adhoc/web-planner.md` screen 4. Place search is the exact same
- * flow as check-in's (`app/checkin/page.tsx`, `T.3`/`T.7`) — search-first
- * against `searchPlacesAction`, with a manual-create fallback — not a
- * separate implementation, just scoped down (no GPS "check in here" path;
- * planning a stop isn't tied to where the user physically is right now).
+ * `docs/adhoc/web-planner.md` screen 4, in both directions: "Add a stop"
+ * and — new — editing an existing stop's place or dates (`updateStopAction`
+ * existed with no UI, which made a mistyped date unfixable). Place search
+ * is the shared `PlaceSearchField`, the same flow as check-in's and the
+ * activity dialog's, not a separate implementation.
  *
  * **Both dates are required here, unlike the wireframe's "leave dates
  * blank for now" copy.** `travellog_stops.arrive_date`/`depart_date` are
@@ -59,83 +59,63 @@ function localDateToDateKey(date: Date): string {
  * `startDate`/`endDate` — and by extension `resolveTripStatus`'s
  * `hasStops`-implies-dated-range invariant (`T.11`) and the whole
  * date-window auto-link engine (`T.12`) — are built on "a stop with dates
- * always has a real, complete range." Retrofitting nullable stop dates
- * would mean revisiting three already-shipped tasks' data model and logic
- * for a UI nicety; out of proportion for what this task needs. `createStop`
- * (`_lib/stops.ts`) already validates depart ≥ arrive server-side — this
- * dialog mirrors that check inline so the error surfaces before a round
- * trip, per the wireframe's own stated "Error (expected)" case.
+ * always has a real, complete range." The server re-validates everything
+ * (format, order, span, overlap with sibling stops); this dialog mirrors
+ * the order check inline so that one surfaces before a round trip.
+ *
+ * A real `<form>`: Enter submits, like `CreateTripDialog`.
  */
-export function AddStopDialog({
+export function StopDialog({
   tripId,
+  mode,
   open,
   onClose,
-  onAdded,
+  onSaved,
 }: {
   tripId: string;
+  mode: StopDialogMode;
   open: boolean;
   onClose: () => void;
-  /** Called with the new stop's id after a successful add, so the caller can select it in the strip. */
-  onAdded: (stopId: string) => void;
+  /** Called with the stop's id after a successful add/edit, so the caller can select it and refresh. */
+  onSaved: (stopId: string) => void;
 }) {
+  const editing = mode.kind === 'edit' ? mode.stop : null;
   const [query, setQuery] = useState('');
-  const [options, setOptions] = useState<PlaceCandidate[]>([]);
-  const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<PlaceCandidate | null>(null);
   const [arriveKey, setArriveKey] = useState<string | null>(null);
   const [departKey, setDepartKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Seed from the mode each time the dialog opens: the edit target's own
+  // values, or the add-mode default arrival.
   useEffect(() => {
-    if (query.trim().length < MIN_QUERY_LENGTH) {
-      setOptions([]);
-      setSearching(false);
-      return;
+    if (!open) return;
+    if (editing) {
+      setSelected({
+        name: editing.placeName,
+        lat: null,
+        lng: null,
+        existingPlaceId: editing.placeId,
+      });
+      setArriveKey(editing.arriveDate);
+      setDepartKey(editing.departDate);
+    } else {
+      setSelected(null);
+      setArriveKey(mode.kind === 'add' ? (mode.defaultArriveKey ?? null) : null);
+      setDepartKey(null);
     }
-    let cancelled = false;
-    setSearching(true);
-    const timer = setTimeout(() => {
-      searchPlacesAction(query.trim())
-        .then((results) => {
-          if (!cancelled) setOptions(results);
-        })
-        .catch(() => {
-          if (!cancelled) setOptions([]);
-        })
-        .finally(() => {
-          if (!cancelled) setSearching(false);
-        });
-    }, SEARCH_DEBOUNCE_MS);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [query]);
-
-  const suggestionOptions = useMemo<SuggestionOption[]>(
-    () =>
-      options.map((candidate, index) => ({
-        id: String(index),
-        label: candidate.name,
-        meta: candidateLocation(candidate) ?? undefined,
-        icon: <Icon name="map-pin" size="sm" aria-hidden={true} />,
-      })),
-    [options],
-  );
+    setQuery('');
+    setError(null);
+  }, [open, editing, mode]);
 
   function handleClose(): void {
     if (submitting) return;
-    setQuery('');
-    setOptions([]);
-    setSelected(null);
-    setArriveKey(null);
-    setDepartKey(null);
-    setError(null);
     onClose();
   }
 
-  async function handleSubmit(): Promise<void> {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
     if (!selected || !arriveKey || !departKey || submitting) return;
     if (compareDateKeys(arriveKey, departKey) > 0) {
       setError('A stop can’t depart before it arrives.');
@@ -144,17 +124,34 @@ export function AddStopDialog({
     setSubmitting(true);
     setError(null);
     try {
-      const placeId = selected.existingPlaceId ?? (await resolvePlaceId(selected));
+      const placeId = await resolvePlaceId(selected);
       if (!placeId) {
         setError('That place couldn’t be saved. Try again.');
         return;
       }
-      const result = await createStopAction(tripId, { placeId, arriveDate: arriveKey, departDate: departKey });
-      if (!result.ok) {
-        setError(result.error);
-        return;
+      if (editing) {
+        const result = await updateStopAction(tripId, editing.id, {
+          ...(placeId !== editing.placeId ? { placeId } : {}),
+          arriveDate: arriveKey,
+          departDate: departKey,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        onSaved(editing.id);
+      } else {
+        const result = await createStopAction(tripId, {
+          placeId,
+          arriveDate: arriveKey,
+          departDate: departKey,
+        });
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        onSaved(result.stop.id);
       }
-      onAdded(result.stop.id);
       handleClose();
     } finally {
       setSubmitting(false);
@@ -162,8 +159,13 @@ export function AddStopDialog({
   }
 
   return (
-    <Dialog open={open} onClose={handleClose} size="md" title="Add a stop">
-      <div className={styles.form}>
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      size="md"
+      title={editing ? 'Edit stop' : 'Add a stop'}
+    >
+      <form onSubmit={(e) => void handleSubmit(e)} className={styles.form}>
         {error && (
           <p className={styles.feedbackError} role="status" aria-live="polite">
             {error}
@@ -173,30 +175,17 @@ export function AddStopDialog({
         <FormField label="Place" required>
           {(field) =>
             selected ? (
-              <div className={styles.selectedSummary}>
-                <span className={styles.selectedSummaryMain}>
-                  <div className={styles.selectedSummaryName}>{selected.name}</div>
-                  {candidateLocation(selected) && (
-                    <div className={styles.selectedSummaryMeta}>{candidateLocation(selected)}</div>
-                  )}
-                </span>
-                <button type="button" className={styles.changeButton} onClick={() => setSelected(null)}>
-                  Change
-                </button>
-              </div>
+              <SelectedPlaceSummary
+                name={selected.name}
+                meta={candidateLocation(selected)}
+                onChange={() => setSelected(null)}
+              />
             ) : (
-              <SuggestionInput
+              <PlaceSearchField
                 id={field.id}
                 value={query}
                 onChange={setQuery}
-                options={suggestionOptions}
-                loading={searching}
-                placeholder="Search for a place"
-                aria-label="Search for a place"
-                onSelect={(option) => {
-                  const candidate = options[Number(option.id)];
-                  if (candidate) setSelected(candidate);
-                }}
+                onSelect={setSelected}
                 createLabel={(value) => `Create "${value}" as a new place`}
                 onCreate={(value) => setSelected({ name: value, lat: null, lng: null })}
               />
@@ -242,31 +231,14 @@ export function AddStopDialog({
             Cancel
           </Button>
           <Button
-            type="button"
-            onClick={() => void handleSubmit()}
+            type="submit"
             loading={submitting}
             disabled={!selected || !arriveKey || !departKey}
           >
-            {submitting ? 'Adding…' : 'Add stop'}
+            {submitting ? 'Saving…' : editing ? 'Save stop' : 'Add stop'}
           </Button>
         </div>
-      </div>
+      </form>
     </Dialog>
   );
-}
-
-async function resolvePlaceId(candidate: PlaceCandidate): Promise<string | null> {
-  const result = await createPlaceAction({
-    name: candidate.name,
-    category: candidate.category,
-    lat: candidate.lat,
-    lng: candidate.lng,
-    address: candidate.address,
-    city: candidate.city,
-    state: candidate.state,
-    country: candidate.country,
-    countryCode: candidate.countryCode,
-    postalCode: candidate.postalCode,
-  });
-  return result.ok ? result.place.id : null;
 }

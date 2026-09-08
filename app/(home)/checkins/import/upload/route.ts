@@ -13,8 +13,14 @@ import { readSwarmCheckins, SwarmExportFormatError } from '../../../../_lib/swar
  * handler actually reads it. A Route Handler, not a server action, for the
  * same reason as `T.7`'s photo upload: a multi-year export ZIP routinely
  * exceeds Next's 1 MB default server-action body cap.
+ *
+ * 50 MB, down from an earlier 200 MB: a Swarm export is JSON only (photos
+ * are URLs, not files), so a decade of check-ins compresses to a few MB —
+ * and this route holds the whole upload in memory and parses it
+ * synchronously on the request path (the fail-fast format check below), so
+ * the cap bounds how long the event loop can be held by one upload.
  */
-const MAX_EXPORT_BYTES = 200 * 1024 * 1024;
+const MAX_EXPORT_BYTES = 50 * 1024 * 1024;
 
 function looksLikeZip(file: File): boolean {
   return (
@@ -37,7 +43,9 @@ export async function POST(request: Request): Promise<Response> {
   }
   if (file.size > MAX_EXPORT_BYTES) {
     return NextResponse.json(
-      { error: `Exports are limited to ${String(Math.floor(MAX_EXPORT_BYTES / (1024 * 1024)))} MB.` },
+      {
+        error: `Exports are limited to ${String(Math.floor(MAX_EXPORT_BYTES / (1024 * 1024)))} MB.`,
+      },
       { status: 400 },
     );
   }

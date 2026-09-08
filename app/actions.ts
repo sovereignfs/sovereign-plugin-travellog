@@ -9,7 +9,13 @@
  *    server action is a public POST endpoint dispatched by action id;
  *    route gating never covers it. Denials read as "not found" so
  *    existence isn't leaked.
- * 3. Returns `ActionResult` (or a purpose-built result type) — domain
+ * 3. Runtime input validation (`_lib/validation.ts`) — the TypeScript
+ *    parameter types are documentation, not enforcement, for a public
+ *    endpoint. Every enum, length, range, and format is re-checked before
+ *    a write, and the failure is a `fail(...)` value, never a thrown
+ *    driver error (which would surface as a 500 and, in a catch-all,
+ *    could leak internal error text to the client).
+ * 4. Returns `ActionResult` (or a purpose-built result type) — domain
  *    failures are values, never throws.
  *
  * Plain typed-object parameters, not the `(prevState, formData)` /
@@ -18,6 +24,11 @@
  * action={...}>`, matching how `sovereign-plugin-kanban`'s own
  * `createProject`/`createBoard` (richer client-driven flows) are typed,
  * as distinct from its simpler single-field dialogs.
+ *
+ * Storage cleanup: the data layer never touches `sdk.storage` (so it stays
+ * testable against a bare DB — `_lib/attachments.ts`'s header); every
+ * delete below that cascades away photo/attachment rows gets their keys
+ * back and removes the objects here, after the transaction has committed.
  */
 import { headers } from 'next/headers';
 import { revalidatePath } from 'next/cache';
@@ -27,10 +38,9 @@ import { recomputeAutoLinksForActor } from './_lib/auto-link';
 import {
   createAttachment,
   deleteAttachment,
-  listAttachments,
+  listAttachmentsWithDates,
   InvalidAttachmentTargetError,
   type AttachmentKind,
-  type AttachmentRow,
 } from './_lib/attachments';
 import {
   requireAttachmentOwner,
@@ -43,14 +53,18 @@ import {
 } from './_lib/authz';
 import { getDb } from './_lib/db';
 import {
+  cancelImportJob,
   getImportJob,
   getLatestImportJob,
+  reopenImportJob,
   setImportJobPlatformJobId,
   type ImportJobRow,
 } from './_lib/import-jobs';
 import {
   createItineraryItem,
   deleteItineraryItem,
+  ItineraryItemValidationError,
+  moveItineraryItem,
   reorderItineraryItem,
   updateItineraryItem,
   type CreateItineraryItemInput,
@@ -63,21 +77,25 @@ import {
   getVisitDetail,
   getVisitTimelinePage,
   listRecentPlaces,
+  listTripsForLinking,
   type RecentPlace,
+  type TripLinkOption,
   type VisitDetail,
   type VisitTimelineCursor,
+  type VisitTimelineFilter,
   type VisitTimelinePage,
 } from './_lib/queries';
 import {
   createStop,
   deleteStop,
   reorderStop,
-  TripDayHasItemsError,
+  StopValidationError,
   updateStop,
   type CreateStopInput,
   type StopRow,
   type UpdateStopInput,
 } from './_lib/stops';
+import { plural } from './_lib/format';
 import { isValidIanaTimeZone, localDateKey } from './_lib/timezone';
 import {
   resolveActiveStop,
@@ -85,7 +103,31 @@ import {
   type ActiveStopInfo,
   type TripModeToday,
 } from './_lib/trip-mode';
-import { createTrip, deleteTrip, updateTrip, type TripRow, type UpdateTripInput } from './_lib/trips';
+import {
+  createTrip,
+  deleteTrip,
+  updateTrip,
+  type TripRow,
+  type UpdateTripInput,
+} from './_lib/trips';
+import {
+  isNonEmptyString,
+  isOneOf,
+  isOptionalString,
+  isOwnStorageKey,
+  isValidDateKeyInput,
+  isValidHappenedAt,
+  isValidIndex,
+  isValidLatitude,
+  isValidLongitude,
+  isValidPlannedTime,
+  isValidTzOffsetMinutes,
+  MAX_NAME_LENGTH,
+  MAX_NOTE_LENGTH,
+  MAX_PHOTOS_PER_VISIT,
+  MAX_TITLE_LENGTH,
+  normalizeCompanions,
+} from './_lib/validation';
 import {
   createVisit,
   deleteVisit,
@@ -102,9 +144,28 @@ const NOT_FOUND_STOP = 'Stop not found.';
 const NOT_FOUND_TRIP_DAY = 'Day not found.';
 const NOT_FOUND_ITEM = 'Itinerary item not found.';
 const NOT_FOUND_ATTACHMENT = 'Attachment not found.';
+const INVALID_TIMEZONE = "That timezone doesn't look valid.";
+const INVALID_HAPPENED_AT = 'A check-in needs a real date and time — not in the future.';
+const INVALID_COMPANIONS = 'Companion names must be short text.';
+const NOTE_TOO_LONG = `A note can be at most ${String(MAX_NOTE_LENGTH)} characters.`;
+
+const ATTACHMENT_KINDS = ['receipt', 'booking', 'accommodation', 'other'] as const;
+const VISIT_SOURCES = ['manual', 'gps'] as const;
+const PHOTO_SOURCES = ['upload'] as const;
 
 function refresh(): void {
   revalidatePath('/travellog', 'layout');
+}
+
+/** Best-effort removal of storage objects whose rows are already gone — a leftover object is a quota leak, never a reason to fail the user's action. */
+async function deleteStorageObjects(keys: string[]): Promise<void> {
+  for (const key of new Set(keys)) {
+    try {
+      await sdk.storage.delete(key);
+    } catch (err) {
+      console.error(`[travellog] Could not remove storage object "${key}":`, err);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -116,9 +177,13 @@ export async function searchPlacesAction(
   near?: { lat: number; lng: number },
 ): Promise<PlaceCandidate[]> {
   const actor = await requireUser();
+  if (typeof query !== 'string' || query.trim().length === 0 || query.length > MAX_NAME_LENGTH)
+    return [];
+  const nearValid =
+    near && isValidLatitude(near.lat) && isValidLongitude(near.lng) ? near : undefined;
   const db = await getDb();
   const provider = await getPlaceProvider(db, actor);
-  return provider.search(query, near);
+  return provider.search(query, nearValid);
 }
 
 /**
@@ -134,6 +199,7 @@ export async function reverseGeocodePlaceAction(
   lng: number,
 ): Promise<PlaceCandidate | null> {
   const actor = await requireUser();
+  if (!isValidLatitude(lat) || !isValidLongitude(lng)) return null;
   const db = await getDb();
   const provider = await getPlaceProvider(db, actor);
   return provider.reverseGeocode(lat, lng);
@@ -161,18 +227,51 @@ export interface CreatePlaceActionInput {
 }
 
 export type CreatePlaceActionResult =
-  | { ok: true; place: Pick<PlaceRow, 'id' | 'name' | 'lat' | 'lng'> }
-  | { ok: false; error: string };
+  { ok: true; place: Pick<PlaceRow, 'id' | 'name' | 'lat' | 'lng'> } | { ok: false; error: string };
 
 export async function createPlaceAction(
   input: CreatePlaceActionInput,
 ): Promise<CreatePlaceActionResult> {
   const actor = await requireUser();
+  if (!isNonEmptyString(input.name, MAX_NAME_LENGTH)) {
+    return { ok: false, error: 'Place name is required.' };
+  }
   const name = input.name.trim();
-  if (name.length === 0) return { ok: false, error: 'Place name is required.' };
+  const hasLat = input.lat != null;
+  const hasLng = input.lng != null;
+  if (hasLat !== hasLng)
+    return { ok: false, error: 'A place needs both a latitude and a longitude.' };
+  if (hasLat && (!isValidLatitude(input.lat) || !isValidLongitude(input.lng))) {
+    return { ok: false, error: 'Those coordinates are out of range.' };
+  }
+  for (const field of [
+    'category',
+    'address',
+    'city',
+    'state',
+    'country',
+    'countryCode',
+    'postalCode',
+  ] as const) {
+    if (!isOptionalString(input[field], MAX_NAME_LENGTH)) {
+      return { ok: false, error: 'Place details must be short text.' };
+    }
+  }
 
   const db = await getDb();
-  const place = await createPlace(db, actor, { ...input, name, source: 'manual' });
+  const place = await createPlace(db, actor, {
+    name,
+    category: input.category ?? null,
+    lat: input.lat ?? null,
+    lng: input.lng ?? null,
+    address: input.address ?? null,
+    city: input.city ?? null,
+    state: input.state ?? null,
+    country: input.country ?? null,
+    countryCode: input.countryCode ?? null,
+    postalCode: input.postalCode ?? null,
+    source: 'manual',
+  });
   refresh();
   return { ok: true, place: { id: place.id, name: place.name, lat: place.lat, lng: place.lng } };
 }
@@ -202,12 +301,46 @@ export interface CreateVisitActionInput {
 export async function createVisitAction(input: CreateVisitActionInput): Promise<ActionResult> {
   const actor = await requireUser();
 
-  if (input.placeId.trim().length === 0) return fail('A check-in needs a place.');
-  if (!Number.isFinite(input.happenedAt)) return fail('A check-in needs a real date and time.');
-  if (!isValidIanaTimeZone(input.tzIana)) return fail("That timezone doesn't look valid.");
+  if (!isNonEmptyString(input.placeId, 64)) return fail('A check-in needs a place.');
+  if (!isValidHappenedAt(input.happenedAt)) return fail(INVALID_HAPPENED_AT);
+  if (!isValidIanaTimeZone(input.tzIana)) return fail(INVALID_TIMEZONE);
+  if (!isValidTzOffsetMinutes(input.tzOffsetMinutes)) return fail(INVALID_TIMEZONE);
+  if (!isOptionalString(input.note, MAX_NOTE_LENGTH)) return fail(NOTE_TOO_LONG);
+  if (!isOneOf(input.source, VISIT_SOURCES)) return fail('Unknown check-in source.');
+  const companions = normalizeCompanions(input.companions);
+  if (!companions) return fail(INVALID_COMPANIONS);
+  const photos = input.photos ?? [];
+  if (!Array.isArray(photos) || photos.length > MAX_PHOTOS_PER_VISIT) {
+    return fail(`A check-in can have at most ${String(MAX_PHOTOS_PER_VISIT)} photos.`);
+  }
+  for (const photo of photos) {
+    // Only a key this plugin minted for *this* user through the upload
+    // route — see `isOwnStorageKey`'s doc comment for what a foreign key
+    // would otherwise let a caller do through this plugin's own storage calls.
+    if (
+      !isOwnStorageKey(photo?.storageKey, 'visits', actor.userId) ||
+      !isOneOf(photo.source, PHOTO_SOURCES)
+    ) {
+      return fail('That photo upload isn’t valid. Try uploading it again.');
+    }
+  }
 
   const db = await getDb();
-  await createVisit(db, actor, input);
+  try {
+    await createVisit(db, actor, {
+      placeId: input.placeId.trim(),
+      happenedAt: input.happenedAt,
+      tzIana: input.tzIana,
+      tzOffsetMinutes: input.tzOffsetMinutes,
+      note: input.note?.trim() || null,
+      companions,
+      source: input.source,
+      photos: photos.map((p) => ({ storageKey: p.storageKey, source: p.source })),
+    });
+  } catch (err) {
+    if (isForeignKeyError(err)) return fail('That place no longer exists — pick it again.');
+    throw err;
+  }
   refresh();
   return ok('Checked in.');
 }
@@ -240,6 +373,10 @@ export async function listRecentPlacesAction(): Promise<RecentPlace[]> {
  * becomes the created visit's `externalRef`, and a retried apply for a
  * mutation already synced — a resumed `drainQueue()` after a dropped
  * response, for instance — is a no-op `ok` rather than a duplicate visit.
+ * The `externalRef` is namespaced with the user id: the unique index is
+ * per tenant, not per user, so two devices minting the same id for two
+ * different users must never collide into a raw constraint error (which
+ * `drainQueue` would retry forever).
  */
 export interface SyncOfflineCheckinInput {
   placeId: string;
@@ -255,14 +392,31 @@ export async function syncOfflineCheckinAction(
 ): Promise<ActionResult> {
   const actor = await requireUser();
 
-  if (input.placeId.trim().length === 0) return fail('A check-in needs a place.');
-  if (!Number.isFinite(input.happenedAt)) return fail('A check-in needs a real date and time.');
-  if (!isValidIanaTimeZone(input.tzIana)) return fail("That timezone doesn't look valid.");
+  if (!isNonEmptyString(mutationId, 128)) return fail('That queued check-in is malformed.');
+  if (!isNonEmptyString(input.placeId, 64)) return fail('A check-in needs a place.');
+  if (!isValidHappenedAt(input.happenedAt)) return fail(INVALID_HAPPENED_AT);
+  if (!isValidIanaTimeZone(input.tzIana)) return fail(INVALID_TIMEZONE);
+  if (!isValidTzOffsetMinutes(input.tzOffsetMinutes)) return fail(INVALID_TIMEZONE);
+  if (!isOptionalString(input.note, MAX_NOTE_LENGTH)) return fail(NOTE_TOO_LONG);
 
+  const externalRef = `${actor.userId}:${mutationId}`;
   const db = await getDb();
-  const alreadySynced = await isVisitAlreadySynced(db, actor, 'manual', mutationId);
+  const alreadySynced = await isVisitAlreadySynced(db, actor, 'manual', externalRef);
   if (!alreadySynced) {
-    await createVisit(db, actor, { ...input, source: 'manual', externalRef: mutationId });
+    try {
+      await createVisit(db, actor, {
+        placeId: input.placeId,
+        happenedAt: input.happenedAt,
+        tzIana: input.tzIana,
+        tzOffsetMinutes: input.tzOffsetMinutes,
+        note: input.note?.trim() || null,
+        source: 'manual',
+        externalRef,
+      });
+    } catch (err) {
+      if (isForeignKeyError(err)) return fail('That place no longer exists.');
+      throw err;
+    }
     refresh();
   }
   return ok('Synced.');
@@ -278,11 +432,25 @@ export async function updateVisitAction(
   const existing = await requireVisitOwner(db, visitId, actor);
   if (!existing) return fail(NOT_FOUND_VISIT);
 
-  if (patch.tzIana !== undefined && !isValidIanaTimeZone(patch.tzIana)) {
-    return fail("That timezone doesn't look valid.");
+  if (patch.tzIana !== undefined && !isValidIanaTimeZone(patch.tzIana))
+    return fail(INVALID_TIMEZONE);
+  if (patch.happenedAt !== undefined && !isValidHappenedAt(patch.happenedAt))
+    return fail(INVALID_HAPPENED_AT);
+  if (patch.tzOffsetMinutes !== undefined && !isValidTzOffsetMinutes(patch.tzOffsetMinutes)) {
+    return fail(INVALID_TIMEZONE);
   }
+  if (!isOptionalString(patch.note, MAX_NOTE_LENGTH)) return fail(NOTE_TOO_LONG);
+  const companions =
+    patch.companions === undefined ? undefined : normalizeCompanions(patch.companions);
+  if (companions === null) return fail(INVALID_COMPANIONS);
 
-  await updateVisit(db, visitId, patch);
+  await updateVisit(db, visitId, {
+    ...(patch.note !== undefined ? { note: patch.note?.trim() || null } : {}),
+    ...(companions !== undefined ? { companions } : {}),
+    ...(patch.happenedAt !== undefined ? { happenedAt: patch.happenedAt } : {}),
+    ...(patch.tzIana !== undefined ? { tzIana: patch.tzIana } : {}),
+    ...(patch.tzOffsetMinutes !== undefined ? { tzOffsetMinutes: patch.tzOffsetMinutes } : {}),
+  });
   refresh();
   return ok('Check-in updated.');
 }
@@ -294,7 +462,8 @@ export async function deleteVisitAction(visitId: string): Promise<ActionResult> 
   const existing = await requireVisitOwner(db, visitId, actor);
   if (!existing) return fail(NOT_FOUND_VISIT);
 
-  await deleteVisit(db, visitId);
+  const { photoStorageKeys } = await deleteVisit(db, visitId);
+  await deleteStorageObjects(photoStorageKeys);
   refresh();
   return ok('Check-in deleted.');
 }
@@ -304,14 +473,23 @@ export async function deleteVisitAction(visitId: string): Promise<ActionResult> 
  * (subsequent pages) calls this again with the previous page's
  * `nextCursor`; the initial page load fetches server-side in
  * `app/(home)/checkins/page.tsx` directly (no client round trip needed for
- * the first page).
+ * the first page). `filter` narrows to one place and/or one trip.
  */
 export async function getVisitTimelinePageAction(
   cursor?: VisitTimelineCursor,
+  filter?: VisitTimelineFilter,
 ): Promise<VisitTimelinePage> {
   const actor = await requireUser();
   const db = await getDb();
-  return getVisitTimelinePage(db, actor, cursor);
+  const safeCursor =
+    cursor && Number.isFinite(cursor.happenedAt) && typeof cursor.id === 'string'
+      ? cursor
+      : undefined;
+  const safeFilter: VisitTimelineFilter = {
+    ...(isNonEmptyString(filter?.placeId, 64) ? { placeId: filter.placeId } : {}),
+    ...(isNonEmptyString(filter?.tripId, 64) ? { tripId: filter.tripId } : {}),
+  };
+  return getVisitTimelinePage(db, actor, safeCursor, safeFilter);
 }
 
 export interface VisitDetailPhotoView {
@@ -356,13 +534,23 @@ export async function getVisitDetailAction(visitId: string): Promise<VisitDetail
         const url = await sdk.storage.getSignedUrl(photo.storageKey, { expiresInSeconds: 3600 });
         return { id: photo.id, url, position: photo.position };
       } catch (err) {
-        console.error(`[travellog] Failed to resolve photo "${photo.id}" for check-in "${visitId}":`, err);
+        console.error(
+          `[travellog] Failed to resolve photo "${photo.id}" for check-in "${visitId}":`,
+          err,
+        );
         return null;
       }
     }),
   );
 
   return { ...detail, photos: resolved.filter((photo) => photo !== null) };
+}
+
+/** A read, not a mutation — the "Link to trip" picker's option list, the caller's own trips only. */
+export async function listTripsForLinkAction(): Promise<TripLinkOption[]> {
+  const actor = await requireUser();
+  const db = await getDb();
+  return listTripsForLinking(db, actor);
 }
 
 // ---------------------------------------------------------------------------
@@ -382,9 +570,10 @@ export async function getLatestImportJobAction(): Promise<ImportJobRow | null> {
 /**
  * Re-enqueues a `travellog_import_jobs` row's platform job — the "Resume"
  * affordance for a row stuck `running` (the platform never auto-reclaims a
- * crashed job; see that table's own doc comment) or still `pending`. The
- * handler always resumes from the row's own persisted `cursor`, never from
- * zero, regardless of how many times this fires.
+ * crashed job; see that table's own doc comment), still `pending`, marked
+ * `failed`, or `cancelled` by the user. The handler always resumes from the
+ * row's own persisted `cursor`, never from zero, regardless of how many
+ * times this fires.
  *
  * Deliberately no `dedupeKey`. A `dedupeKey` matching an "already-active
  * (queued/scheduled/running)" job would have seemed like the safe choice —
@@ -409,6 +598,11 @@ export async function resumeImportAction(importJobId: string): Promise<ActionRes
   if (job.status === 'completed') {
     return fail('This import has already finished.');
   }
+  if (job.status === 'cancelled') {
+    // The handler treats a `cancelled` row as terminal — flip it back to
+    // pending before re-enqueueing so the resumed attempt actually runs.
+    await reopenImportJob(db, importJobId);
+  }
 
   const requestHeaders = await headers();
   const jobRef = await sdk.jobs.enqueue(
@@ -418,6 +612,21 @@ export async function resumeImportAction(importJobId: string): Promise<ActionRes
   await setImportJobPlatformJobId(db, importJobId, jobRef.id);
   refresh();
   return ok('Resuming import…');
+}
+
+/** Asks a running import to stop at its next progress checkpoint — the cursor is kept, so "Resume" later continues from there. */
+export async function cancelImportAction(importJobId: string): Promise<ActionResult> {
+  const actor = await requireUser();
+  const db = await getDb();
+
+  const job = await getImportJob(db, importJobId);
+  if (!job || job.tenantId !== actor.tenantId || job.userId !== actor.userId) {
+    return fail('Import not found.');
+  }
+  const cancelled = await cancelImportJob(db, importJobId);
+  if (!cancelled) return fail('This import isn’t running.');
+  refresh();
+  return ok('Stopping the import…');
 }
 
 // ---------------------------------------------------------------------------
@@ -430,13 +639,13 @@ export async function resumeImportAction(importJobId: string): Promise<ActionRes
 // comment for the full reasoning.
 
 export type CreateTripActionResult =
-  | { ok: true; trip: Pick<TripRow, 'id' | 'name'> }
-  | { ok: false; error: string };
+  { ok: true; trip: Pick<TripRow, 'id' | 'name'> } | { ok: false; error: string };
 
 export async function createTripAction(name: string): Promise<CreateTripActionResult> {
   const actor = await requireUser();
+  if (!isNonEmptyString(name, MAX_NAME_LENGTH))
+    return { ok: false, error: 'Trip name is required.' };
   const trimmed = name.trim();
-  if (trimmed.length === 0) return { ok: false, error: 'Trip name is required.' };
 
   const db = await getDb();
   const trip = await createTrip(db, actor, trimmed);
@@ -444,14 +653,29 @@ export async function createTripAction(name: string): Promise<CreateTripActionRe
   return { ok: true, trip: { id: trip.id, name: trip.name } };
 }
 
-export async function updateTripAction(tripId: string, patch: UpdateTripInput): Promise<ActionResult> {
+export async function updateTripAction(
+  tripId: string,
+  patch: UpdateTripInput,
+): Promise<ActionResult> {
   const actor = await requireUser();
   const db = await getDb();
 
   const existing = await requireTripOwner(db, tripId, actor);
   if (!existing) return fail(NOT_FOUND_TRIP);
 
-  await updateTrip(db, tripId, patch);
+  if (patch.name !== undefined && !isNonEmptyString(patch.name, MAX_NAME_LENGTH)) {
+    return fail('Trip name is required.');
+  }
+  if (patch.timezone != null && !isValidIanaTimeZone(patch.timezone)) return fail(INVALID_TIMEZONE);
+  const companions =
+    patch.companions === undefined ? undefined : normalizeCompanions(patch.companions);
+  if (companions === null) return fail(INVALID_COMPANIONS);
+
+  await updateTrip(db, tripId, {
+    ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
+    ...(patch.timezone !== undefined ? { timezone: patch.timezone } : {}),
+    ...(companions !== undefined ? { companions } : {}),
+  });
   refresh();
   return ok('Trip updated.');
 }
@@ -463,7 +687,8 @@ export async function deleteTripAction(tripId: string): Promise<ActionResult> {
   const existing = await requireTripOwner(db, tripId, actor);
   if (!existing) return fail(NOT_FOUND_TRIP);
 
-  await deleteTrip(db, tripId);
+  const { attachmentStorageKeys } = await deleteTrip(db, tripId);
+  await deleteStorageObjects(attachmentStorageKeys);
   refresh();
   return ok('Trip deleted.');
 }
@@ -475,6 +700,18 @@ export type CreateStopActionResult =
   | { ok: true; stop: Pick<StopRow, 'id' | 'arriveDate' | 'departDate' | 'position'> }
   | { ok: false; error: string };
 
+function validateStopPatch(input: Partial<CreateStopInput>): string | null {
+  if (input.placeId !== undefined && !isNonEmptyString(input.placeId, 64))
+    return 'A stop needs a place.';
+  if (input.arriveDate !== undefined && !isValidDateKeyInput(input.arriveDate)) {
+    return 'A stop needs a real arrival date.';
+  }
+  if (input.departDate !== undefined && !isValidDateKeyInput(input.departDate)) {
+    return 'A stop needs a real departure date.';
+  }
+  return null;
+}
+
 export async function createStopAction(
   tripId: string,
   input: CreateStopInput,
@@ -484,15 +721,31 @@ export async function createStopAction(
   const trip = await requireTripOwner(db, tripId, actor);
   if (!trip) return { ok: false, error: NOT_FOUND_TRIP };
 
+  if (!isNonEmptyString(input.placeId, 64)) return { ok: false, error: 'A stop needs a place.' };
+  const invalid = validateStopPatch(input);
+  if (invalid) return { ok: false, error: invalid };
+
   try {
-    const stop = await createStop(db, tripId, input);
+    const stop = await createStop(db, tripId, {
+      placeId: input.placeId.trim(),
+      arriveDate: input.arriveDate,
+      departDate: input.departDate,
+    });
     refresh();
     return {
       ok: true,
-      stop: { id: stop.id, arriveDate: stop.arriveDate, departDate: stop.departDate, position: stop.position },
+      stop: {
+        id: stop.id,
+        arriveDate: stop.arriveDate,
+        departDate: stop.departDate,
+        position: stop.position,
+      },
     };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Could not add that stop.' };
+    if (err instanceof StopValidationError) return { ok: false, error: err.message };
+    if (isForeignKeyError(err))
+      return { ok: false, error: 'That place no longer exists — pick it again.' };
+    throw err;
   }
 }
 
@@ -509,10 +762,18 @@ export async function updateStopAction(
   const stop = await requireStopOwner(db, stopId, actor);
   if (!stop || stop.tripId !== tripId) return fail(NOT_FOUND_STOP);
 
+  const invalid = validateStopPatch(patch);
+  if (invalid) return fail(invalid);
+
   try {
-    await updateStop(db, tripId, stopId, patch);
+    await updateStop(db, tripId, stopId, {
+      ...(patch.placeId !== undefined ? { placeId: patch.placeId.trim() } : {}),
+      ...(patch.arriveDate !== undefined ? { arriveDate: patch.arriveDate } : {}),
+      ...(patch.departDate !== undefined ? { departDate: patch.departDate } : {}),
+    });
   } catch (err) {
-    if (err instanceof TripDayHasItemsError) return fail(err.message);
+    if (err instanceof StopValidationError) return fail(err.message);
+    if (isForeignKeyError(err)) return fail('That place no longer exists — pick it again.');
     throw err;
   }
   refresh();
@@ -528,12 +789,14 @@ export async function deleteStopAction(tripId: string, stopId: string): Promise<
   const stop = await requireStopOwner(db, stopId, actor);
   if (!stop || stop.tripId !== tripId) return fail(NOT_FOUND_STOP);
 
+  let attachmentStorageKeys: string[];
   try {
-    await deleteStop(db, tripId, stopId);
+    ({ attachmentStorageKeys } = await deleteStop(db, tripId, stopId));
   } catch (err) {
-    if (err instanceof TripDayHasItemsError) return fail(err.message);
+    if (err instanceof StopValidationError) return fail(err.message);
     throw err;
   }
+  await deleteStorageObjects(attachmentStorageKeys);
   refresh();
   return ok('Stop removed.');
 }
@@ -551,6 +814,7 @@ export async function reorderStopAction(
   if (!trip) return fail(NOT_FOUND_TRIP);
   const stop = await requireStopOwner(db, stopId, actor);
   if (!stop || stop.tripId !== tripId) return fail(NOT_FOUND_STOP);
+  if (!isValidIndex(targetIndex)) return fail('Invalid position.');
 
   await reorderStop(db, tripId, stopId, targetIndex);
   refresh();
@@ -561,8 +825,22 @@ export async function reorderStopAction(
 // Itinerary items (T.11)
 
 export type CreateItineraryItemActionResult =
-  | { ok: true; item: Pick<ItineraryItemRow, 'id' | 'position'> }
-  | { ok: false; error: string };
+  { ok: true; item: Pick<ItineraryItemRow, 'id' | 'position'> } | { ok: false; error: string };
+
+function validateItemPatch(input: UpdateItineraryItemInput): string | null {
+  if (input.placeId != null && !isNonEmptyString(input.placeId, 64))
+    return 'That place isn’t valid.';
+  if (!isOptionalString(input.title, MAX_TITLE_LENGTH)) {
+    return `A title can be at most ${String(MAX_TITLE_LENGTH)} characters.`;
+  }
+  if (input.plannedTime != null && !isValidPlannedTime(input.plannedTime)) {
+    return 'A planned time must look like 14:30.';
+  }
+  if (input.isFixed !== undefined && typeof input.isFixed !== 'boolean')
+    return 'Invalid fixed flag.';
+  if (!isOptionalString(input.notes, MAX_NOTE_LENGTH)) return NOTE_TOO_LONG;
+  return null;
+}
 
 export async function createItineraryItemAction(
   tripDayId: string,
@@ -573,13 +851,18 @@ export async function createItineraryItemAction(
 
   const day = await requireTripDayOwner(db, tripDayId, actor);
   if (!day) return { ok: false, error: NOT_FOUND_TRIP_DAY };
+  const invalid = validateItemPatch(input);
+  if (invalid) return { ok: false, error: invalid };
 
   try {
     const item = await createItineraryItem(db, tripDayId, day.tripId, input);
     refresh();
     return { ok: true, item: { id: item.id, position: item.position } };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Could not add that item.' };
+    if (err instanceof ItineraryItemValidationError) return { ok: false, error: err.message };
+    if (isForeignKeyError(err))
+      return { ok: false, error: 'That place no longer exists — pick it again.' };
+    throw err;
   }
 }
 
@@ -592,11 +875,15 @@ export async function updateItineraryItemAction(
 
   const existing = await requireItineraryItemOwner(db, itemId, actor);
   if (!existing) return fail(NOT_FOUND_ITEM);
+  const invalid = validateItemPatch(patch);
+  if (invalid) return fail(invalid);
 
   try {
     await updateItineraryItem(db, itemId, patch);
   } catch (err) {
-    return fail(err instanceof Error ? err.message : 'Could not update that item.');
+    if (err instanceof ItineraryItemValidationError) return fail(err.message);
+    if (isForeignKeyError(err)) return fail('That place no longer exists — pick it again.');
+    throw err;
   }
   refresh();
   return ok('Item updated.');
@@ -614,6 +901,29 @@ export async function deleteItineraryItemAction(itemId: string): Promise<ActionR
   return ok('Item removed.');
 }
 
+/** Moves an item to another day of the same trip (appended at the end of that day). Both the item and the target day must be the caller's. */
+export async function moveItineraryItemAction(
+  itemId: string,
+  targetTripDayId: string,
+): Promise<ActionResult> {
+  const actor = await requireUser();
+  const db = await getDb();
+
+  const existing = await requireItineraryItemOwner(db, itemId, actor);
+  if (!existing) return fail(NOT_FOUND_ITEM);
+  const day = await requireTripDayOwner(db, targetTripDayId, actor);
+  if (!day) return fail(NOT_FOUND_TRIP_DAY);
+
+  try {
+    await moveItineraryItem(db, itemId, targetTripDayId);
+  } catch (err) {
+    if (err instanceof ItineraryItemValidationError) return fail(err.message);
+    throw err;
+  }
+  refresh();
+  return ok('Item moved.');
+}
+
 /** `targetIndex` is 0-based among the day's *other* items — see `_lib/itinerary-items.ts`'s `reorderItineraryItem`. */
 export async function reorderItineraryItemAction(
   tripDayId: string,
@@ -627,6 +937,7 @@ export async function reorderItineraryItemAction(
   if (!day) return fail(NOT_FOUND_TRIP_DAY);
   const item = await requireItineraryItemOwner(db, itemId, actor);
   if (!item || item.tripDayId !== tripDayId) return fail(NOT_FOUND_ITEM);
+  if (!isValidIndex(targetIndex)) return fail('Invalid position.');
 
   await reorderItineraryItem(db, tripDayId, itemId, targetIndex);
   refresh();
@@ -643,6 +954,9 @@ export async function reorderItineraryItemAction(
  * (never trust a client-supplied id twice removed from its own
  * authorization), which is also where `InvalidAttachmentTargetError`
  * (`T.10`'s XOR validator) gets translated into a plain `ActionResult`.
+ * The `storageKey` must be one that route minted for this user
+ * (`isOwnStorageKey`) — a foreign key here would let a caller sign, and
+ * later delete, any object whose key they'd learned.
  */
 export interface CreateAttachmentActionInput {
   tripId?: string;
@@ -658,16 +972,29 @@ export async function createAttachmentAction(
   const actor = await requireUser();
   const db = await getDb();
 
-  if (input.tripId) {
-    const trip = await requireTripOwner(db, input.tripId, actor);
+  const tripId = input.tripId || undefined;
+  const tripDayId = input.tripDayId || undefined;
+  if (tripId) {
+    const trip = await requireTripOwner(db, tripId, actor);
     if (!trip) return fail(NOT_FOUND_TRIP);
-  } else if (input.tripDayId) {
-    const day = await requireTripDayOwner(db, input.tripDayId, actor);
+  } else if (tripDayId) {
+    const day = await requireTripDayOwner(db, tripDayId, actor);
     if (!day) return fail(NOT_FOUND_TRIP_DAY);
+  }
+  if (!isOneOf(input.kind, ATTACHMENT_KINDS)) return fail('Unknown attachment kind.');
+  if (!isNonEmptyString(input.title, MAX_TITLE_LENGTH)) return fail('An attachment needs a title.');
+  if (!isOwnStorageKey(input.storageKey, 'attachments', actor.userId)) {
+    return fail('That upload isn’t valid. Try uploading the file again.');
   }
 
   try {
-    await createAttachment(db, actor, input);
+    await createAttachment(db, actor, {
+      tripId,
+      tripDayId,
+      kind: input.kind,
+      title: input.title.trim(),
+      storageKey: input.storageKey,
+    });
   } catch (err) {
     if (err instanceof InvalidAttachmentTargetError) return fail(err.message);
     throw err;
@@ -684,9 +1011,7 @@ export async function deleteAttachmentAction(attachmentId: string): Promise<Acti
   if (!existing) return fail(NOT_FOUND_ATTACHMENT);
 
   const deleted = await deleteAttachment(db, attachmentId);
-  if (deleted) {
-    await sdk.storage.delete(deleted.storageKey);
-  }
+  if (deleted) await deleteStorageObjects([deleted.storageKey]);
   refresh();
   return ok('Attachment deleted.');
 }
@@ -696,6 +1021,8 @@ export interface TripAttachmentView {
   kind: AttachmentKind;
   title: string;
   url: string;
+  /** The day this attachment belongs to (`YYYY-MM-DD`), or `null` for a trip-level one. */
+  date: string | null;
 }
 
 /**
@@ -715,14 +1042,23 @@ export async function getTripAttachmentsAction(tripId: string): Promise<TripAtta
   const trip = await requireTripOwner(db, tripId, actor);
   if (!trip) return [];
 
-  const rows = await listAttachments(db, tripId);
+  const rows = await listAttachmentsWithDates(db, tripId);
   const resolved = await Promise.all(
-    rows.map(async (row: AttachmentRow) => {
+    rows.map(async (row) => {
       try {
         const url = await sdk.storage.getSignedUrl(row.storageKey, { expiresInSeconds: 3600 });
-        return { id: row.id, kind: row.kind as AttachmentKind, title: row.title, url };
+        return {
+          id: row.id,
+          kind: row.kind as AttachmentKind,
+          title: row.title,
+          url,
+          date: row.date,
+        };
       } catch (err) {
-        console.error(`[travellog] Failed to resolve attachment "${row.id}" for trip "${tripId}":`, err);
+        console.error(
+          `[travellog] Failed to resolve attachment "${row.id}" for trip "${tripId}":`,
+          err,
+        );
         return null;
       }
     }),
@@ -734,13 +1070,13 @@ export async function getTripAttachmentsAction(tripId: string): Promise<TripAtta
 // Auto-link (T.12)
 
 /**
- * The manual-override / "Unlink" action — `T.6`'s detail column is the UI
- * hook point (`CheckinDetailPanel.tsx`'s Unlink button). `tripId: null`
- * unlinks; a real id links to that trip. Either way this always writes
- * `linkSource: 'manual'` (`_lib/visits.ts`'s `setVisitTripLink`), so a
- * future recompute never overrides the user's explicit choice — including
- * the unlink, which is why this isn't just `updateVisitAction` with a
- * `tripId` field.
+ * The manual-override action — `T.6`'s detail column is the UI hook point
+ * (`CheckinDetailPanel.tsx`'s Unlink button and "Link to trip" picker).
+ * `tripId: null` unlinks; a real id links to that trip. Either way this
+ * always writes `linkSource: 'manual'` (`_lib/visits.ts`'s `setVisitTripLink`),
+ * so a future recompute never overrides the user's explicit choice —
+ * including the unlink, which is why this isn't just `updateVisitAction`
+ * with a `tripId` field.
  */
 export async function setVisitTripLinkAction(
   visitId: string,
@@ -752,6 +1088,7 @@ export async function setVisitTripLinkAction(
   const visit = await requireVisitOwner(db, visitId, actor);
   if (!visit) return fail(NOT_FOUND_VISIT);
 
+  if (tripId !== null && !isNonEmptyString(tripId, 64)) return fail(NOT_FOUND_TRIP);
   if (tripId) {
     const trip = await requireTripOwner(db, tripId, actor);
     if (!trip) return fail(NOT_FOUND_TRIP);
@@ -778,7 +1115,7 @@ export async function recomputeMyAutoLinksAction(): Promise<ActionResult> {
   return ok(
     changed === 0
       ? 'Check-in links are already up to date.'
-      : `Updated ${String(changed)} check-in link${changed === 1 ? '' : 's'}.`,
+      : `Updated ${plural(changed, 'check-in link')}.`,
   );
 }
 
@@ -788,6 +1125,8 @@ export async function recomputeMyAutoLinksAction(): Promise<ActionResult> {
 export interface TripModeView {
   stop: ActiveStopInfo;
   today: TripModeToday;
+  /** The zone `today` was resolved in — echoed back so the client re-derives "next" and the countdown in the same zone as the clock ticks. */
+  tzIana: string;
 }
 
 /**
@@ -810,7 +1149,7 @@ export async function getTripModeAction(
   const db = await getDb();
 
   const trip = await requireTripOwner(db, tripId, actor);
-  if (!trip || !isValidIanaTimeZone(tzIana)) return null;
+  if (!trip || !isValidIanaTimeZone(tzIana) || !Number.isFinite(nowUtcMs)) return null;
 
   const dateKey = localDateKey(nowUtcMs, tzIana);
   const stop = await resolveActiveStop(db, tripId, dateKey);
@@ -819,5 +1158,15 @@ export async function getTripModeAction(
   const today = await resolveTripModeToday(db, stop.stopId, nowUtcMs, tzIana);
   if (!today) return null;
 
-  return { stop, today };
+  return { stop, today, tzIana };
+}
+
+// ---------------------------------------------------------------------------
+
+/** A driver FK violation (a `placeId` that doesn't exist) — surfaced as a friendly `fail`, never a 500 or a raw constraint message. */
+function isForeignKeyError(err: unknown): boolean {
+  const text = [err, (err as { cause?: unknown } | null)?.cause]
+    .map((e) => (e instanceof Error ? e.message : String(e ?? '')))
+    .join(' ');
+  return /foreign key/i.test(text);
 }

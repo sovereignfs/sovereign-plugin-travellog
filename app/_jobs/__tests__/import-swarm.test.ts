@@ -20,6 +20,7 @@ const harness = vi.hoisted(() => ({
   storageObjects: new Map<string, Uint8Array>(),
   putCalls: [] as { key: string; contentType: string; ownerUserId?: string }[],
   notificationsSent: [] as { recipientUserId: string; title: string; body?: string }[],
+  deleteCalls: [] as string[],
 }));
 
 vi.mock('@sovereignfs/sdk', () => ({
@@ -27,6 +28,10 @@ vi.mock('@sovereignfs/sdk', () => ({
     db: { getClient: vi.fn(async () => harness.dbClient) },
     crypto: { seal: fakeSeal, open: fakeOpen, registerTables: fakeRegisterTables },
     storage: {
+      delete: vi.fn(async (key: string) => {
+        harness.deleteCalls.push(key);
+        harness.storageObjects.delete(key);
+      }),
       get: vi.fn(async (key: string) => {
         const bytes = harness.storageObjects.get(key);
         if (!bytes) return null;
@@ -45,7 +50,11 @@ vi.mock('@sovereignfs/sdk', () => ({
       }),
       put: vi.fn(async (input: { key?: string; contentType: string; ownerUserId?: string }) => {
         const key = input.key ?? `stored/${String(harness.putCalls.length)}`;
-        harness.putCalls.push({ key, contentType: input.contentType, ownerUserId: input.ownerUserId });
+        harness.putCalls.push({
+          key,
+          contentType: input.contentType,
+          ownerUserId: input.ownerUserId,
+        });
         return {
           id: key,
           key,
@@ -92,12 +101,15 @@ function checkin(id: string, venueId: string, venueName: string, photoCount = 0)
     venue: { id: venueId, name: venueName, location: { lat: 1, lng: 2, city: 'Testville' } },
     photos: {
       items: Array.from({ length: photoCount }, (_, i) => ({
-        prefix: `https://photos.example/${id}-`,
+        prefix: `https://fastly.4sqi.net/img/general/${id}-`,
         suffix: `-${String(i)}.jpg`,
       })),
     },
   };
 }
+
+/** Bytes that pass the job's magic-byte sniff (`_lib/file-type.ts`) — a JPEG SOI marker plus padding. */
+const JPEG_BYTES = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0, 0, 0]);
 
 function zipOf(checkins: unknown[]): Uint8Array {
   return zipSync({ 'checkins.json': strToU8(JSON.stringify(checkins)) });
@@ -107,7 +119,9 @@ async function importedVisits(t: TestDb) {
   return t.db
     .select()
     .from(schema.visits)
-    .where(and(eq(schema.visits.tenantId, actor.tenantId), eq(schema.visits.source, 'import:swarm')))
+    .where(
+      and(eq(schema.visits.tenantId, actor.tenantId), eq(schema.visits.source, 'import:swarm')),
+    )
     .orderBy(schema.visits.externalRef);
 }
 
@@ -118,6 +132,7 @@ beforeEach(async () => {
   harness.storageObjects.clear();
   harness.putCalls = [];
   harness.notificationsSent = [];
+  harness.deleteCalls = [];
   t = await createTestDb();
   harness.dbClient = t.travellog;
 });
@@ -129,9 +144,18 @@ afterEach(() => {
 
 describe('handleImportSwarm — happy path', () => {
   it('imports every checkin, marks the job completed, and sends a notification', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/jpeg' } })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JPEG_BYTES, { status: 200, headers: { 'content-type': 'image/jpeg' } }),
+      ),
+    );
 
-    const zip = zipOf([checkin('c1', 'v1', 'Corvo Coffee', 1), checkin('c2', 'v2', 'Time Out Market', 0)]);
+    const zip = zipOf([
+      checkin('c1', 'v1', 'Corvo Coffee', 1),
+      checkin('c2', 'v2', 'Time Out Market', 0),
+    ]);
     harness.storageObjects.set(IMPORT_ZIP_KEY, zip);
     const job = await createImportJob(t.travellog, actor, IMPORT_ZIP_KEY);
 
@@ -149,14 +173,27 @@ describe('handleImportSwarm — happy path', () => {
 
     expect(harness.notificationsSent).toHaveLength(1);
     expect(harness.notificationsSent[0]?.recipientUserId).toBe(actor.userId);
+    // The uploaded ZIP is removed once the import completes — it used to
+    // sit in plugin storage forever, unowned and outside the account sweep.
+    expect(harness.deleteCalls).toEqual([IMPORT_ZIP_KEY]);
   });
 });
 
 describe('handleImportSwarm — resume from cursor (review checklist)', () => {
   it('does not reprocess checkins before the cursor', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200, headers: { 'content-type': 'image/jpeg' } })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JPEG_BYTES, { status: 200, headers: { 'content-type': 'image/jpeg' } }),
+      ),
+    );
 
-    const zip = zipOf([checkin('c1', 'v1', 'First'), checkin('c2', 'v2', 'Second'), checkin('c3', 'v3', 'Third')]);
+    const zip = zipOf([
+      checkin('c1', 'v1', 'First'),
+      checkin('c2', 'v2', 'Second'),
+      checkin('c3', 'v3', 'Third'),
+    ]);
     harness.storageObjects.set(IMPORT_ZIP_KEY, zip);
     const job = await createImportJob(t.travellog, actor, IMPORT_ZIP_KEY);
 
@@ -181,7 +218,10 @@ describe('handleImportSwarm — resume from cursor (review checklist)', () => {
   });
 
   it('a resumed run that reaches an already-imported checkin (inserted by the crashed attempt just before it died) skips it without erroring', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JPEG_BYTES, { status: 200 })),
+    );
 
     const zip = zipOf([checkin('c1', 'v1', 'First'), checkin('c2', 'v2', 'Second')]);
     harness.storageObjects.set(IMPORT_ZIP_KEY, zip);
@@ -226,9 +266,18 @@ describe('handleImportSwarm — resume from cursor (review checklist)', () => {
 
 describe('handleImportSwarm — re-running an already-completed import (review checklist)', () => {
   it('creates no duplicate rows', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200, headers: { 'content-type': 'image/jpeg' } })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JPEG_BYTES, { status: 200, headers: { 'content-type': 'image/jpeg' } }),
+      ),
+    );
 
-    const zip = zipOf([checkin('c1', 'v1', 'Corvo Coffee', 1), checkin('c2', 'v2', 'Time Out Market')]);
+    const zip = zipOf([
+      checkin('c1', 'v1', 'Corvo Coffee', 1),
+      checkin('c2', 'v2', 'Time Out Market'),
+    ]);
     harness.storageObjects.set(IMPORT_ZIP_KEY, zip);
     const job = await createImportJob(t.travellog, actor, IMPORT_ZIP_KEY);
 
@@ -256,7 +305,10 @@ describe('handleImportSwarm — re-running an already-completed import (review c
   });
 
   it('a stray re-enqueue after the job already shows completed is a pure no-op', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1]), { status: 200 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JPEG_BYTES, { status: 200 })),
+    );
 
     const zip = zipOf([checkin('c1', 'v1', 'Corvo Coffee')]);
     harness.storageObjects.set(IMPORT_ZIP_KEY, zip);
@@ -280,7 +332,7 @@ describe('handleImportSwarm — a failed photo does not abort the job (review ch
       vi.fn(async () => {
         call++;
         if (call === 1) return new Response(null, { status: 404 });
-        return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+        return new Response(JPEG_BYTES, { status: 200, headers: { 'content-type': 'image/jpeg' } });
       }),
     );
 
@@ -300,7 +352,10 @@ describe('handleImportSwarm — a failed photo does not abort the job (review ch
   });
 
   it('a checkin with every photo failing still imports, with zero photos attached', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 500 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 500 })),
+    );
 
     const zip = zipOf([checkin('c1', 'v1', 'Corvo Coffee', 2)]);
     harness.storageObjects.set(IMPORT_ZIP_KEY, zip);

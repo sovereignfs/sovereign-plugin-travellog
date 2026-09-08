@@ -24,7 +24,15 @@
  * search_path, and the qualified form fails at migration time. See
  * docs/plugin-database.md "Foreign keys in a Postgres schema".
  */
-import { bigint, doublePrecision, index, integer, pgTable, text, unique } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  doublePrecision,
+  index,
+  integer,
+  pgTable,
+  text,
+  unique,
+} from 'drizzle-orm/pg-core';
 
 export const places = pgTable(
   'travellog_places',
@@ -43,7 +51,8 @@ export const places = pgTable(
     postalCode: text('postal_code'),
     source: text('source').notNull(),
     sourceRef: text('source_ref'),
-    createdBy: text('created_by').notNull(),
+    /** Nullable attribution — see ./schema.ts. */
+    createdBy: text('created_by'),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
@@ -74,6 +83,7 @@ export const visits = pgTable(
   (t) => [
     index('travellog_visits_user_happened_idx').on(t.userId, t.happenedAt),
     index('travellog_visits_place_idx').on(t.placeId),
+    index('travellog_visits_trip_idx').on(t.tripId),
     unique('travellog_visits_tenant_source_external_ref_unique').on(
       t.tenantId,
       t.source,
@@ -86,6 +96,7 @@ export const visitPhotos = pgTable(
   'travellog_visit_photos',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull().default('default'),
     visitId: text('visit_id')
       .notNull()
       .references(() => visits.id, { onDelete: 'cascade' }),
@@ -118,6 +129,7 @@ export const stops = pgTable(
   'travellog_stops',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull().default('default'),
     tripId: text('trip_id')
       .notNull()
       .references(() => trips.id, { onDelete: 'cascade' }),
@@ -130,13 +142,17 @@ export const stops = pgTable(
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
-  (t) => [index('travellog_stops_trip_position_idx').on(t.tripId, t.position)],
+  (t) => [
+    index('travellog_stops_trip_position_idx').on(t.tripId, t.position),
+    index('travellog_stops_dates_idx').on(t.arriveDate, t.departDate),
+  ],
 );
 
 export const tripDays = pgTable(
   'travellog_trip_days',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull().default('default'),
     stopId: text('stop_id')
       .notNull()
       .references(() => stops.id, { onDelete: 'cascade' }),
@@ -149,13 +165,17 @@ export const tripDays = pgTable(
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
-  (t) => [unique('travellog_trip_days_stop_date_unique').on(t.stopId, t.date)],
+  (t) => [
+    unique('travellog_trip_days_stop_date_unique').on(t.stopId, t.date),
+    index('travellog_trip_days_trip_idx').on(t.tripId),
+  ],
 );
 
 export const itineraryItems = pgTable(
   'travellog_itinerary_items',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull().default('default'),
     tripDayId: text('trip_day_id')
       .notNull()
       .references(() => tripDays.id, { onDelete: 'restrict' }),
@@ -173,13 +193,17 @@ export const itineraryItems = pgTable(
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
-  (t) => [index('travellog_itinerary_items_day_position_idx').on(t.tripDayId, t.position)],
+  (t) => [
+    index('travellog_itinerary_items_day_position_idx').on(t.tripDayId, t.position),
+    index('travellog_itinerary_items_trip_idx').on(t.tripId),
+  ],
 );
 
 export const attachments = pgTable(
   'travellog_attachments',
   {
     id: text('id').primaryKey(),
+    tenantId: text('tenant_id').notNull().default('default'),
     tripId: text('trip_id').references(() => trips.id, { onDelete: 'cascade' }),
     tripDayId: text('trip_day_id').references(() => tripDays.id, { onDelete: 'cascade' }),
     kind: text('kind').notNull(),

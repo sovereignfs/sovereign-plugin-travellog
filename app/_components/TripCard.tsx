@@ -1,6 +1,7 @@
-import { useRouter } from 'next/navigation';
-import { Badge, Button } from '@sovereignfs/ui';
-import { daysBetweenDateKeys, formatDateRange, todayDateKey } from '../_lib/dates';
+import Link from 'next/link';
+import { Badge } from '@sovereignfs/ui';
+import { daysBetweenDateKeys, formatDateRange } from '../_lib/dates';
+import { plural } from '../_lib/format';
 import type { TripCard as TripCardData } from '../_lib/queries';
 import styles from './TripCard.module.css';
 
@@ -19,116 +20,95 @@ const CTA_LABEL: Record<TripCardData['status'], string> = {
   completed: 'View trip',
 };
 
-function metaLine(trip: TripCardData): string {
+function metaLine(trip: TripCardData, todayKey: string): string {
+  const stopsText = `${plural(trip.stopCount, 'stop')}`;
   if (trip.status === 'planning' || !trip.startDate || !trip.endDate) {
-    return `Dates not set yet · ${String(trip.stopCount)} stop${trip.stopCount === 1 ? '' : 's'} planned`;
+    return `Dates not set yet · ${stopsText} planned`;
   }
 
   const dateRange = formatDateRange(trip.startDate, trip.endDate);
-  const stopsText = `${String(trip.stopCount)} stop${trip.stopCount === 1 ? '' : 's'}`;
 
   if (trip.status === 'ongoing') {
     const totalDays = daysBetweenDateKeys(trip.startDate, trip.endDate) + 1;
     const currentDay = Math.min(
-      Math.max(daysBetweenDateKeys(trip.startDate, todayDateKey()) + 1, 1),
+      Math.max(daysBetweenDateKeys(trip.startDate, todayKey) + 1, 1),
       totalDays,
     );
     return `${dateRange} · day ${String(currentDay)} of ${String(totalDays)} · ${stopsText}`;
   }
 
   const dayCount = daysBetweenDateKeys(trip.startDate, trip.endDate) + 1;
-  return `${dateRange} · ${String(dayCount)} day${dayCount === 1 ? '' : 's'} · ${stopsText}`;
+  return `${dateRange} · ${plural(dayCount, 'day')} · ${stopsText}`;
 }
 
 /**
- * `docs/adhoc/web-trips.md`: the Ongoing card gets a filled CTA button
- * (`variant="primary"`, the default) — "it's the one action a user in the
- * middle of a trip actually wants" — every other status uses a plain text
- * link (`variant="ghost"`), deliberately less visually loud. "Open Trip
+ * `docs/adhoc/web-trips.md`: the Ongoing card gets a filled CTA — "it's the
+ * one action a user in the middle of a trip actually wants" — every other
+ * status a plain text link, deliberately less visually loud. "Open Trip
  * Mode" navigates to the real Trip Mode screen (`T.19`,
  * `/travellog/planner/[tripId]/mode`) — not gated to mobile here the way
- * Planner's own "Start Trip Mode" entry point is (`T.19`): that screen
- * renders correctly at any width (confirmed live during `T.19`'s own
- * verification), just without a dedicated design pass yet, and
- * `CONCEPT.md`'s Trips section names no separate desktop destination for
- * an ongoing trip's CTA to fall back to. `T.22` found this still pointed
- * at the plain Planner workspace — a real Trip Mode route didn't exist
- * when this shipped in `T.14`/`T.17`.
+ * Planner's own entry point is: that screen renders at any width.
  *
- * Clicking the card body opens `T.14`'s detail column (`onSelect`) — the
- * CTA button is a nested, independently-clickable control, so its own click
- * handler stops propagation rather than also selecting the card underneath
- * it. Completed's CTA ("View trip") also just opens the detail column: the
- * full single-page trip view it more literally implies stays deferred
- * (CONCEPT.md), and the detail column is the closest real destination that
- * exists now — no longer `disabled`, since `T.14` (this task) is what its
- * old "Coming in T.14" placeholder was waiting for.
+ * Structure: the select target is a real `<button>` and the CTA a sibling
+ * `<Link>` — never an interactive control nested inside a `role="button"`
+ * (invalid ARIA; screen readers announced one control). The CTA is real
+ * navigation, so it's a link (middle-click, copy address) styled as the
+ * DS button rather than a `router.push` on a `<Button>`. Completed's CTA
+ * ("View trip") opens the detail column, the closest destination that
+ * exists while the full single-page trip view stays deferred (CONCEPT.md).
  */
 export function TripCard({
   trip,
+  todayKey,
   selected,
   onSelect,
 }: {
   trip: TripCardData;
+  todayKey: string;
   selected: boolean;
   onSelect: (id: string) => void;
 }) {
-  const router = useRouter();
   const isOngoing = trip.status === 'ongoing';
+  const href = isOngoing ? `/travellog/planner/${trip.id}/mode` : `/travellog/planner/${trip.id}`;
 
   return (
     <div
-      className={[styles.card, isOngoing ? styles.cardOngoing : '', selected ? styles.cardSelected : '']
+      className={[
+        styles.card,
+        isOngoing ? styles.cardOngoing : '',
+        selected ? styles.cardSelected : '',
+      ]
         .filter(Boolean)
         .join(' ')}
-      role="button"
-      tabIndex={0}
-      aria-pressed={selected}
-      onClick={() => onSelect(trip.id)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onSelect(trip.id);
-        }
-      }}
     >
-      {/* Plain `mono` for every status, including Ongoing — the design
-          system is deliberately monochrome (CLAUDE.md), and `Badge` has no
-          "inverted/filled" variant to match the wireframe's illustrative
-          dark-badge treatment for Ongoing. The CTA button's filled-vs-ghost
-          split (below) is the wireframe's own stated primary signal for
-          Ongoing's distinctiveness, not the badge. */}
-      <Badge variant="mono" uppercase={false}>
-        {STATUS_LABEL[trip.status]}
-      </Badge>
-      <h3 className={styles.name}>{trip.name}</h3>
-      <p className={styles.meta}>{metaLine(trip)}</p>
+      <button
+        type="button"
+        className={styles.selectTarget}
+        aria-pressed={selected}
+        aria-label={`${trip.name} — ${selected ? 'hide' : 'show'} details`}
+        onClick={() => onSelect(trip.id)}
+      >
+        {/* Plain `mono` for every status, including Ongoing — the design
+            system is deliberately monochrome (CLAUDE.md); the CTA's
+            filled-vs-ghost split is the wireframe's stated primary signal. */}
+        <Badge variant="mono" uppercase={false}>
+          {STATUS_LABEL[trip.status]}
+        </Badge>
+        <h3 className={styles.name}>{trip.name}</h3>
+        {trip.destinationSummary && <p className={styles.destination}>{trip.destinationSummary}</p>}
+        <p className={styles.meta}>{metaLine(trip, todayKey)}</p>
+        {trip.checkinCount > 0 && (
+          <p className={styles.meta}>{plural(trip.checkinCount, 'check-in')} on this trip</p>
+        )}
+      </button>
       {trip.status === 'completed' ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          className={styles.cta}
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelect(trip.id);
-          }}
-        >
+        <button type="button" className={styles.ctaGhost} onClick={() => onSelect(trip.id)}>
           {CTA_LABEL[trip.status]} →
-        </Button>
+        </button>
       ) : (
-        <Button
-          variant={isOngoing ? 'primary' : 'ghost'}
-          size="sm"
-          className={styles.cta}
-          onClick={(e) => {
-            e.stopPropagation();
-            router.push(
-              isOngoing ? `/travellog/planner/${trip.id}/mode` : `/travellog/planner/${trip.id}`,
-            );
-          }}
-        >
+        <Link href={href} className={isOngoing ? styles.ctaPrimary : styles.ctaGhost}>
           {CTA_LABEL[trip.status]} →
-        </Button>
+        </Link>
       )}
     </div>
   );

@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Badge, Button, Card, FileDropzone, Progress, useToast } from '@sovereignfs/ui';
-import { getLatestImportJobAction, resumeImportAction } from '../actions';
+import { cancelImportAction, getLatestImportJobAction, resumeImportAction } from '../actions';
+import { plural } from '../_lib/format';
 import type { ImportJobRow } from '../_lib/import-jobs';
 import styles from './ImportStatus.module.css';
 
@@ -14,9 +16,12 @@ function isActive(job: ImportJobRow | null): boolean {
 
 /**
  * `T.8`'s import screen body — an upload zone when there's nothing active,
- * a progress card (polled) while a job runs, or a completed/failed summary.
- * The page itself (`(home)/checkins/import/page.tsx`) fetches the initial
- * state server-side; this component owns the upload flow and polling.
+ * a progress card (polled) while a job runs, or a completed/failed/
+ * cancelled summary. The page itself (`(home)/checkins/import/page.tsx`)
+ * fetches the initial state server-side; this component owns the upload
+ * flow, polling, cancel, and resume. A finished import leads straight to
+ * the timeline; a running one can be stopped (it keeps its place, so
+ * "Resume" continues rather than restarting).
  */
 export function ImportStatus({ initialJob }: { initialJob: ImportJobRow | null }) {
   const toast = useToast();
@@ -25,6 +30,7 @@ export function ImportStatus({ initialJob }: { initialJob: ImportJobRow | null }
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [resuming, setResuming] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const active = isActive(job);
 
   // Refreshed on an interval while a job is pending/running — the platform
@@ -74,7 +80,11 @@ export function ImportStatus({ initialJob }: { initialJob: ImportJobRow | null }
     try {
       const result = await resumeImportAction(job.id);
       if (!result.ok) {
-        toast.show({ title: 'Couldn’t resume the import', message: result.error, category: 'error' });
+        toast.show({
+          title: 'Couldn’t resume the import',
+          message: result.error,
+          category: 'error',
+        });
         return;
       }
       const latest = await getLatestImportJobAction();
@@ -84,8 +94,26 @@ export function ImportStatus({ initialJob }: { initialJob: ImportJobRow | null }
     }
   }
 
+  async function handleCancel(): Promise<void> {
+    if (!job) return;
+    setCancelling(true);
+    try {
+      const result = await cancelImportAction(job.id);
+      if (!result.ok) {
+        toast.show({ title: 'Couldn’t stop the import', message: result.error, category: 'error' });
+        return;
+      }
+      const latest = await getLatestImportJobAction();
+      setJob(latest);
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   if (active && job) {
-    const percent = job.totalCheckins ? Math.round((job.processedCheckins / job.totalCheckins) * 100) : 0;
+    const percent = job.totalCheckins
+      ? Math.round((job.processedCheckins / job.totalCheckins) * 100)
+      : 0;
     return (
       <div className={styles.section}>
         <Card>
@@ -111,13 +139,21 @@ export function ImportStatus({ initialJob }: { initialJob: ImportJobRow | null }
               <span className={styles.photoCounts}>
                 {job.processedPhotos} of {job.totalPhotos} photos fetched
                 {job.failedPhotos > 0 &&
-                  ` · ${String(job.failedPhotos)} photo${job.failedPhotos === 1 ? '' : 's'} failed (skipped, not blocking)`}
+                  ` · ${plural(job.failedPhotos, 'photo')} failed (skipped, not blocking)`}
               </span>
             )}
           </div>
           <p className={styles.backgroundNote}>
             You’ll get a notification when this finishes. Safe to close this tab.
           </p>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void handleCancel()}
+            loading={cancelling}
+          >
+            Stop import
+          </Button>
         </Card>
       </div>
     );
@@ -128,11 +164,12 @@ export function ImportStatus({ initialJob }: { initialJob: ImportJobRow | null }
       {job?.status === 'completed' && (
         <Card className={styles.summaryCard}>
           <span className={styles.summaryText}>
-            Last import: {job.processedCheckins} check-in{job.processedCheckins === 1 ? '' : 's'}
-            {job.failedPhotos > 0 &&
-              ` (${String(job.failedPhotos)} photo${job.failedPhotos === 1 ? '' : 's'} skipped)`}
-            .
+            Last import: {plural(job.processedCheckins, 'check-in')}
+            {job.failedPhotos > 0 && ` (${plural(job.failedPhotos, 'photo')} skipped)`}.
           </span>
+          <Link href="/travellog/checkins" className={styles.viewLink}>
+            View check-ins →
+          </Link>
         </Card>
       )}
       {job?.status === 'failed' && (
@@ -142,6 +179,17 @@ export function ImportStatus({ initialJob }: { initialJob: ImportJobRow | null }
           </span>
           <Button variant="secondary" onClick={() => void handleResume()} loading={resuming}>
             Try again
+          </Button>
+        </Card>
+      )}
+      {job?.status === 'cancelled' && (
+        <Card className={styles.summaryCard}>
+          <span className={styles.summaryText}>
+            Import stopped after {plural(job.processedCheckins, 'check-in')}. Resume to continue
+            from there, or upload a new export.
+          </span>
+          <Button variant="secondary" onClick={() => void handleResume()} loading={resuming}>
+            Resume
           </Button>
         </Card>
       )}

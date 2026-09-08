@@ -267,11 +267,23 @@ describe('getTripsOverview (T.13, payload 1)', () => {
   it('tallies trips into all four computed statuses', async () => {
     await createTrip(t.travellog, actor, 'No stops yet'); // planning
     const upcoming = await createTrip(t.travellog, actor, 'Upcoming trip');
-    await createStop(t.travellog, upcoming.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    await createStop(t.travellog, upcoming.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-12',
+    });
     const ongoing = await createTrip(t.travellog, actor, 'Ongoing trip');
-    await createStop(t.travellog, ongoing.id, { placeId, arriveDate: '2026-05-30', departDate: '2026-06-02' });
+    await createStop(t.travellog, ongoing.id, {
+      placeId,
+      arriveDate: '2026-05-30',
+      departDate: '2026-06-02',
+    });
     const completed = await createTrip(t.travellog, actor, 'Completed trip');
-    await createStop(t.travellog, completed.id, { placeId, arriveDate: '2026-05-01', departDate: '2026-05-03' });
+    await createStop(t.travellog, completed.id, {
+      placeId,
+      arriveDate: '2026-05-01',
+      departDate: '2026-05-03',
+    });
 
     const overview = await getTripsOverview(t.travellog, actor, '2026-06-01');
     expect(overview.tripCounts).toEqual({ planning: 1, upcoming: 1, ongoing: 1, completed: 1 });
@@ -300,13 +312,40 @@ describe('getTripsOverview (T.13, payload 1)', () => {
       updatedAt: now,
     });
     // placeId itself has no country set by default — give it one for this test.
-    await t.db.update(schema.places).set({ country: 'Portugal' }).where(eq(schema.places.id, placeId));
+    await t.db
+      .update(schema.places)
+      .set({ country: 'Portugal' })
+      .where(eq(schema.places.id, placeId));
 
-    await createVisit(t.travellog, actor, { placeId, happenedAt: now, tzIana: 'UTC', tzOffsetMinutes: 0, source: 'manual' });
-    await createVisit(t.travellog, actor, { placeId: 'place-2', happenedAt: now, tzIana: 'UTC', tzOffsetMinutes: 0, source: 'manual' });
-    await createVisit(t.travellog, actor, { placeId: 'place-3', happenedAt: now, tzIana: 'UTC', tzOffsetMinutes: 0, source: 'manual' });
+    await createVisit(t.travellog, actor, {
+      placeId,
+      happenedAt: now,
+      tzIana: 'UTC',
+      tzOffsetMinutes: 0,
+      source: 'manual',
+    });
+    await createVisit(t.travellog, actor, {
+      placeId: 'place-2',
+      happenedAt: now,
+      tzIana: 'UTC',
+      tzOffsetMinutes: 0,
+      source: 'manual',
+    });
+    await createVisit(t.travellog, actor, {
+      placeId: 'place-3',
+      happenedAt: now,
+      tzIana: 'UTC',
+      tzOffsetMinutes: 0,
+      source: 'manual',
+    });
     // A second visit to the same place — must not double-count uniquePlaceCount.
-    await createVisit(t.travellog, actor, { placeId, happenedAt: now, tzIana: 'UTC', tzOffsetMinutes: 0, source: 'manual' });
+    await createVisit(t.travellog, actor, {
+      placeId,
+      happenedAt: now,
+      tzIana: 'UTC',
+      tzOffsetMinutes: 0,
+      source: 'manual',
+    });
 
     const overview = await getTripsOverview(t.travellog, actor, '2026-06-01');
     expect(overview.totalCheckins).toBe(4);
@@ -316,9 +355,17 @@ describe('getTripsOverview (T.13, payload 1)', () => {
 
   it('surfaces the soonest upcoming trip, not just any upcoming trip', async () => {
     const farther = await createTrip(t.travellog, actor, 'Later trip');
-    await createStop(t.travellog, farther.id, { placeId, arriveDate: '2026-08-01', departDate: '2026-08-03' });
+    await createStop(t.travellog, farther.id, {
+      placeId,
+      arriveDate: '2026-08-01',
+      departDate: '2026-08-03',
+    });
     const sooner = await createTrip(t.travellog, actor, 'Sooner trip');
-    await createStop(t.travellog, sooner.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    await createStop(t.travellog, sooner.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-12',
+    });
 
     const overview = await getTripsOverview(t.travellog, actor, '2026-06-01');
     expect(overview.nextTrip).toEqual({ id: sooner.id, name: 'Sooner trip', daysUntil: 9 });
@@ -327,7 +374,11 @@ describe('getTripsOverview (T.13, payload 1)', () => {
   it('scopes everything to the caller — another user’s trips/visits never count', async () => {
     const otherActor = { tenantId: 'tenant-1', userId: 'user-2' };
     const theirTrip = await createTrip(t.travellog, otherActor, 'Not mine');
-    await createStop(t.travellog, theirTrip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    await createStop(t.travellog, theirTrip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-12',
+    });
     await createVisit(t.travellog, otherActor, {
       placeId,
       happenedAt: Date.now(),
@@ -381,8 +432,16 @@ describe('listTripCards (T.13, payload 2)', () => {
       updatedAt: now,
     });
     const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
-    await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
-    await createStop(t.travellog, trip.id, { placeId: 'place-2', arriveDate: '2026-06-12', departDate: '2026-06-14' });
+    await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-12',
+    });
+    await createStop(t.travellog, trip.id, {
+      placeId: 'place-2',
+      arriveDate: '2026-06-12',
+      departDate: '2026-06-14',
+    });
 
     const [card] = await listTripCards(t.travellog, actor);
     expect(card?.destinationSummary).toBe('Belém Tower +1');
@@ -395,7 +454,11 @@ describe('listTripCards (T.13, payload 2)', () => {
 
   it('a single-stop trip has no "+N" suffix', async () => {
     const trip = await createTrip(t.travellog, actor, 'Weekend trip');
-    await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-12',
+    });
     const [card] = await listTripCards(t.travellog, actor);
     expect(card?.destinationSummary).toBe('Belém Tower');
   });
@@ -415,7 +478,11 @@ describe('listTripsForPicker (T.15, payload 6)', () => {
   it('includes planning and upcoming trips, with a stop count', async () => {
     const planning = await createTrip(t.travellog, actor, 'Someday trip');
     const upcoming = await createTrip(t.travellog, actor, 'Berlin Design Week');
-    await createStop(t.travellog, upcoming.id, { placeId, arriveDate: '2999-01-01', departDate: '2999-01-03' });
+    await createStop(t.travellog, upcoming.id, {
+      placeId,
+      arriveDate: '2999-01-01',
+      departDate: '2999-01-03',
+    });
 
     const entries = await listTripsForPicker(t.travellog, actor);
     expect(entries).toHaveLength(2);
@@ -433,7 +500,7 @@ describe('listTripsForPicker (T.15, payload 6)', () => {
     });
   });
 
-  it('excludes ongoing and completed trips', async () => {
+  it('returns ongoing and completed trips too, with their status — the picker filters with the viewer’s own local date', async () => {
     const ongoing = await createTrip(t.travellog, actor, 'Ongoing trip');
     const todayKey = todayDateKey();
     await createStop(t.travellog, ongoing.id, {
@@ -443,9 +510,15 @@ describe('listTripsForPicker (T.15, payload 6)', () => {
     });
 
     const completed = await createTrip(t.travellog, actor, 'Completed trip');
-    await createStop(t.travellog, completed.id, { placeId, arriveDate: '2020-01-01', departDate: '2020-01-03' });
+    await createStop(t.travellog, completed.id, {
+      placeId,
+      arriveDate: '2020-01-01',
+      departDate: '2020-01-03',
+    });
 
-    expect(await listTripsForPicker(t.travellog, actor)).toEqual([]);
+    const entries = await listTripsForPicker(t.travellog, actor);
+    expect(entries.find((e) => e.id === ongoing.id)?.status).toBe('ongoing');
+    expect(entries.find((e) => e.id === completed.id)?.status).toBe('completed');
   });
 
   it('scopes to the caller — another user’s trips never appear', async () => {
@@ -473,8 +546,16 @@ describe('listWorkspaceStops (T.15, payload 7)', () => {
       updatedAt: now,
     });
     const trip = await createTrip(t.travellog, actor, 'Portugal 2026');
-    await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
-    await createStop(t.travellog, trip.id, { placeId: 'place-2', arriveDate: '2026-06-12', departDate: '2026-06-14' });
+    await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-12',
+    });
+    await createStop(t.travellog, trip.id, {
+      placeId: 'place-2',
+      arriveDate: '2026-06-12',
+      departDate: '2026-06-14',
+    });
 
     const stops = await listWorkspaceStops(t.travellog, actor, trip.id);
     expect(stops.map((s) => s.placeName)).toEqual(['Belém Tower', 'Porto']);
@@ -484,7 +565,11 @@ describe('listWorkspaceStops (T.15, payload 7)', () => {
   it('another user’s trip never appears, even by a guessed tripId', async () => {
     const otherActor = { tenantId: 'tenant-1', userId: 'user-2' };
     const trip = await createTrip(t.travellog, otherActor, 'Not mine');
-    await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-12',
+    });
     expect(await listWorkspaceStops(t.travellog, actor, trip.id)).toEqual([]);
   });
 });
@@ -532,7 +617,11 @@ describe('listWorkspaceDays (T.16, payload 7’s day list)', () => {
     const [resultDay] = days;
     if (!resultDay) throw new Error('expected a day');
     expect(resultDay.items).toHaveLength(2);
-    expect(resultDay.items[0]).toMatchObject({ title: 'Free time', placeId: null, placeName: null });
+    expect(resultDay.items[0]).toMatchObject({
+      title: 'Free time',
+      placeId: null,
+      placeName: null,
+    });
     expect(resultDay.items[1]).toMatchObject({
       placeId,
       placeName: 'Belém Tower',
@@ -545,7 +634,11 @@ describe('listWorkspaceDays (T.16, payload 7’s day list)', () => {
   it('another user’s trip never appears, even by a guessed tripId', async () => {
     const otherActor = { tenantId: 'tenant-1', userId: 'user-2' };
     const trip = await createTrip(t.travellog, otherActor, 'Not mine');
-    await createStop(t.travellog, trip.id, { placeId, arriveDate: '2026-06-10', departDate: '2026-06-12' });
+    await createStop(t.travellog, trip.id, {
+      placeId,
+      arriveDate: '2026-06-10',
+      departDate: '2026-06-12',
+    });
     expect(await listWorkspaceDays(t.travellog, actor, trip.id)).toEqual([]);
   });
 });
@@ -607,7 +700,10 @@ describe('listRecentPlaces (T.21)', () => {
 
   it('respects the limit parameter', async () => {
     for (let i = 0; i < 5; i++) {
-      const place = await createPlace(t.travellog, actor, { name: `Place ${String(i)}`, source: 'manual' });
+      const place = await createPlace(t.travellog, actor, {
+        name: `Place ${String(i)}`,
+        source: 'manual',
+      });
       await createVisit(t.travellog, actor, {
         placeId: place.id,
         happenedAt: Date.UTC(2026, 7, i + 1),

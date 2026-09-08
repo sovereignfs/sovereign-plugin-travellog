@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type CurrentPositionStatus = 'idle' | 'loading' | 'granted' | 'denied' | 'unavailable';
 
@@ -26,9 +26,15 @@ const GEOLOCATION_OPTIONS: PositionOptions = {
  * a denied/unavailable browser is a normal, expected outcome for GPS
  * check-in (`T.7`'s review checklist — search/manual entry must still work
  * with no location permission granted), never a console error or a crash.
+ *
+ * `watch: true` keeps following the device after the first fix
+ * (`watchPosition`, cleared on unmount) — Trip Mode's "current position"
+ * was a single snapshot before, frozen for the rest of the screen's life.
  */
-export function useCurrentPosition(): UseCurrentPositionResult {
+export function useCurrentPosition(options: { watch?: boolean } = {}): UseCurrentPositionResult {
+  const { watch = false } = options;
   const [state, setState] = useState<CurrentPositionState>({ status: 'idle', coords: null });
+  const watchIdRef = useRef<number | null>(null);
 
   const request = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
@@ -36,21 +42,41 @@ export function useCurrentPosition(): UseCurrentPositionResult {
       return;
     }
     setState({ status: 'loading', coords: null });
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setState({
-          status: 'granted',
-          coords: { lat: position.coords.latitude, lng: position.coords.longitude },
-        });
-      },
-      (error) => {
-        setState({
-          status: error.code === error.PERMISSION_DENIED ? 'denied' : 'unavailable',
-          coords: null,
-        });
-      },
-      GEOLOCATION_OPTIONS,
-    );
+    const onSuccess = (position: GeolocationPosition): void => {
+      setState({
+        status: 'granted',
+        coords: { lat: position.coords.latitude, lng: position.coords.longitude },
+      });
+    };
+    const onError = (error: GeolocationPositionError): void => {
+      setState((current) => ({
+        status: error.code === error.PERMISSION_DENIED ? 'denied' : 'unavailable',
+        // A transient error mid-watch keeps the last known fix rather than blanking it.
+        coords: error.code === error.PERMISSION_DENIED ? null : current.coords,
+      }));
+    };
+    if (watch) {
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        onSuccess,
+        onError,
+        GEOLOCATION_OPTIONS,
+      );
+    } else {
+      navigator.geolocation.getCurrentPosition(onSuccess, onError, GEOLOCATION_OPTIONS);
+    }
+  }, [watch]);
+
+  useEffect(() => {
+    return () => {
+      if (
+        watchIdRef.current !== null &&
+        typeof navigator !== 'undefined' &&
+        navigator.geolocation
+      ) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+    };
   }, []);
 
   return { ...state, request };
