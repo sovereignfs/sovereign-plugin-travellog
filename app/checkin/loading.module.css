@@ -1,0 +1,8 @@
+.centered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sv-space-3);
+  min-height: 240px;
+  color: var(--sv-color-text-muted);
+}
